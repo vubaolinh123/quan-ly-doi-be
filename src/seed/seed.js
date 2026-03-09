@@ -14,7 +14,7 @@ const sampleOfficers = [
     capBac: 'Đại úy',
     chucVu: 'Điều tra viên',
     soDienThoai: '0900000001',
-    categoryCodes: ['CUOP_GIAT_NHAT', 'GIET_NGUOI', 'KHAC'],
+    categoryCodes: ['DB', 'LD', 'KHXM'],
     active: true
   },
   {
@@ -22,7 +22,7 @@ const sampleOfficers = [
     capBac: 'Thượng úy',
     chucVu: 'Cán bộ xử lý',
     soDienThoai: '0900000002',
-    categoryCodes: ['MA_TUY', 'HIEP_DAM_CUONG_BAO'],
+    categoryCodes: ['TDD', 'VK'],
     active: true
   },
   {
@@ -30,7 +30,7 @@ const sampleOfficers = [
     capBac: 'Thiếu tá',
     chucVu: 'Điều tra viên',
     soDienThoai: '0900000003',
-    categoryCodes: ['THAM_NHUNG', 'GIAN_LAN_THUONG_MAI', 'PHI_TANG_AN'],
+    categoryCodes: ['MBDL', 'TMDT', 'BC'],
     active: true
   },
   {
@@ -38,7 +38,7 @@ const sampleOfficers = [
     capBac: 'Đại úy',
     chucVu: 'Cán bộ chuyên án',
     soDienThoai: '0900000004',
-    categoryCodes: ['TO_CHUC_DANH_BAC', 'BUON_NGUOI', 'CUOP_GIAT_NHAT'],
+    categoryCodes: ['MD', 'BVTE', 'DB'],
     active: true
   },
   {
@@ -46,7 +46,7 @@ const sampleOfficers = [
     capBac: 'Trung úy',
     chucVu: 'Cán bộ nghiệp vụ',
     soDienThoai: '0900000005',
-    categoryCodes: ['KHAC', 'MA_TUY', 'GIET_NGUOI'],
+    categoryCodes: ['KHXM', 'TDD', 'LD'],
     active: true
   }
 ];
@@ -79,7 +79,8 @@ const seed = async () => {
         color: CATEGORY_COLORS[code],
         sortOrder: index,
         assignmentCursor: 0,
-        active: true
+        active: true,
+        isLocked: true
       }))
     );
 

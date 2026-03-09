@@ -3,25 +3,75 @@ import env from '../config/env.js';
 class MessageBatchService {
   constructor() {
     this.batches = new Map();
+    this.handler = null;
   }
 
-  addMessage(senderId, messageText, onFlush) {
-    if (!this.batches.has(senderId)) {
-      this.batches.set(senderId, { messages: [], timer: null });
+  onBatchReady(handler) {
+    this.handler = handler;
+  }
+
+  addMessage(senderId, message) {
+    const key = String(senderId || '');
+    if (!key) return;
+
+    let batch = this.batches.get(key);
+
+    if (!batch) {
+      const timer = setTimeout(() => {
+        void this.flush(key);
+      }, env.messageBatchWindowMs);
+
+      batch = {
+        messages: [],
+        timer,
+        createdAt: Date.now()
+      };
+
+      this.batches.set(key, batch);
     }
 
-    const batch = this.batches.get(senderId);
-    batch.messages.push(messageText);
+    batch.messages.push({
+      ...message,
+      receivedAt: Date.now()
+    });
+  }
 
-    if (batch.timer) {
+  async flush(senderId) {
+    const key = String(senderId || '');
+    const batch = this.batches.get(key);
+    if (!batch) return;
+
+    clearTimeout(batch.timer);
+    this.batches.delete(key);
+
+    if (!batch.messages.length || typeof this.handler !== 'function') return;
+
+    await this.handler({
+      senderId: key,
+      messages: batch.messages,
+      startedAt: batch.createdAt,
+      windowMs: env.messageBatchWindowMs
+    });
+  }
+
+  getBatchSize(senderId) {
+    const key = String(senderId || '');
+    return this.batches.get(key)?.messages.length || 0;
+  }
+
+  clearBatch(senderId) {
+    const key = String(senderId || '');
+    const batch = this.batches.get(key);
+    if (batch?.timer) {
       clearTimeout(batch.timer);
     }
+    this.batches.delete(key);
+  }
 
-    batch.timer = setTimeout(() => {
-      const messages = [...batch.messages];
-      this.batches.delete(senderId);
-      onFlush(messages);
-    }, env.messageBatchWindowMs);
+  clearAll() {
+    for (const senderId of this.batches.keys()) {
+      this.clearBatch(senderId);
+    }
   }
 }
 

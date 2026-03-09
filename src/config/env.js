@@ -2,6 +2,11 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const toPositiveInt = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 5000,
@@ -10,15 +15,19 @@ const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   adminEmail: process.env.ADMIN_EMAIL || 'admin@cshs.local',
   adminPassword: process.env.ADMIN_PASSWORD || 'Admin@123456',
-  facebookVerifyToken: process.env.FACEBOOK_VERIFY_TOKEN || 'fb_verify_token_change_me',
+  // Facebook
+  facebookVerifyToken: process.env.FACEBOOK_VERIFY_TOKEN || 'change_this_fb_verify_token',
   facebookPageAccessToken: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || '',
   facebookAppSecret: process.env.FACEBOOK_APP_SECRET || '',
+  // Gemini
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+  // Telegram
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
-  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || '',
-  messageBatchWindowMs: Number(process.env.MESSAGE_BATCH_WINDOW_MS) || 5000
+  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || 'change_this_tg_secret',
+  // Batching
+  messageBatchWindowMs: toPositiveInt(process.env.MESSAGE_BATCH_WINDOW_MS, 5000)
 };
 
 export default env;

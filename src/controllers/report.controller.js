@@ -42,7 +42,6 @@ export const getReports = asyncHandler(async (req, res) => {
 
   const [items, total] = await Promise.all([
     Report.find(query)
-      .populate('approvedBy', 'hoTen role')
       .sort({ createdAt: -1 })
       .skip((currentPage - 1) * pageSize)
       .limit(pageSize),
@@ -63,7 +62,7 @@ export const getReports = asyncHandler(async (req, res) => {
 });
 
 export const getReportById = asyncHandler(async (req, res) => {
-  const item = await Report.findById(req.params.id).populate('approvedBy', 'hoTen role');
+  const item = await Report.findById(req.params.id);
   if (!item) {
     return res.status(404).json({ success: false, message: 'Không tìm thấy tố giác' });
   }
@@ -74,7 +73,7 @@ export const updateReport = asyncHandler(async (req, res) => {
   const item = await Report.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
     runValidators: true
-  }).populate('approvedBy', 'hoTen role');
+  });
 
   if (!item) {
     return res.status(404).json({ success: false, message: 'Không tìm thấy tố giác' });

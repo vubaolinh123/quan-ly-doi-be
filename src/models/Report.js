@@ -42,12 +42,46 @@ const reportSchema = new mongoose.Schema(
       default: 'pending_approval'
     },
     approvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      type: String,
       default: null
     },
     approvedAt: {
       type: Date,
+      default: null
+    },
+    decisionMessageId: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    decisionUpdateId: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    rejectedBy: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    rejectedAt: {
+      type: Date,
+      default: null
+    },
+    rejectedReason: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    decisionSource: {
+      type: String,
+      enum: ['telegram', 'web'],
+      default: null
+    },
+    finalCategoryCode: {
+      type: String,
+      uppercase: true,
+      trim: true,
       default: null
     }
   },

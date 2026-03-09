@@ -1,21 +1,78 @@
+import { CATEGORY_CODES } from '../constants/domain.constants.js';
+
+export const AI_INTENTS = ['report_crime', 'ask_info', 'complaint', 'other'];
+export const AI_CATEGORY_CODES = Object.keys(CATEGORY_CODES);
+
 export const AI_ANALYSIS_SCHEMA = {
-  required: ['intent', 'confidence', 'adminSummary'],
-  intents: ['report', 'inquiry', 'other']
+  type: 'object',
+  required: [
+    'intent',
+    'suggestedCategoryCode',
+    'confidence',
+    'missingFields',
+    'followupMessage',
+    'adminSummary'
+  ],
+  properties: {
+    intent: { type: 'string', enum: AI_INTENTS },
+    suggestedCategoryCode: { type: 'string', enum: AI_CATEGORY_CODES },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    missingFields: { type: 'array', items: { type: 'string' } },
+    followupMessage: { type: 'string' },
+    adminSummary: { type: 'string' }
+  }
 };
 
-export const validateAiAnalysis = (data) => {
-  if (!data || typeof data !== 'object') return false;
-  if (!AI_ANALYSIS_SCHEMA.intents.includes(data.intent)) return false;
-  if (typeof data.confidence !== 'number') return false;
-  if (typeof data.adminSummary !== 'string') return false;
+const hasOnlyAllowedKeys = (obj, allowedKeys) =>
+  Object.keys(obj).every((key) => allowedKeys.includes(key));
+
+export const validateAiAnalysis = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const requiredFields = AI_ANALYSIS_SCHEMA.required;
+  const propertyNames = Object.keys(AI_ANALYSIS_SCHEMA.properties);
+
+  if (!hasOnlyAllowedKeys(value, propertyNames)) {
+    return false;
+  }
+
+  for (const field of requiredFields) {
+    if (!(field in value)) {
+      return false;
+    }
+  }
+
+  if (!AI_INTENTS.includes(value.intent)) {
+    return false;
+  }
+
+  if (!AI_CATEGORY_CODES.includes(value.suggestedCategoryCode)) {
+    return false;
+  }
+
+  if (typeof value.confidence !== 'number' || value.confidence < 0 || value.confidence > 1) {
+    return false;
+  }
+
+  if (!Array.isArray(value.missingFields) || value.missingFields.some((item) => typeof item !== 'string')) {
+    return false;
+  }
+
+  if (typeof value.followupMessage !== 'string' || typeof value.adminSummary !== 'string') {
+    return false;
+  }
+
   return true;
 };
 
-export const fallbackAnalysis = {
-  intent: 'report',
-  suggestedCategoryCode: null,
+export const createSafeAiFallback = () => ({
+  intent: 'other',
+  suggestedCategoryCode: 'KHXM',
   confidence: 0,
-  missingFields: ['thông tin người tố giác', 'nội dung chi tiết'],
-  followupMessage: 'Xin lỗi, chúng tôi chưa hiểu rõ nội dung. Bạn có thể mô tả lại sự việc không?',
-  adminSummary: '[AI parse failed] Cần xem xét thủ công'
-};
+  missingFields: ['fullName', 'phone', 'incidentTime', 'incidentLocation'],
+  followupMessage:
+    'Vui lòng cung cấp họ tên, số điện thoại, thời gian và địa điểm xảy ra vụ việc để chúng tôi tiếp nhận đầy đủ.',
+  adminSummary: 'AI fallback: chưa đủ dữ liệu để phân tích chính xác, cần bổ sung thông tin từ người gửi.'
+});

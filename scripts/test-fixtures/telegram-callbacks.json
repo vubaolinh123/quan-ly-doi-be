@@ -1,0 +1,19 @@
+{
+  "approve": {
+    "update_id": 990001,
+    "callback_query": {
+      "id": "e2e-callback-approve",
+      "from": {
+        "id": 456789123,
+        "username": "e2e_admin"
+      },
+      "message": {
+        "message_id": 33001,
+        "chat": {
+          "id": 88776655
+        }
+      },
+      "data": "approve|__REPORT_ID__"
+    }
+  }
+}

@@ -1,27 +1,27 @@
 export const CATEGORY_CODES = {
-  CUOP_GIAT_NHAT: 'Cướp, cướp giật, trộm cắp',
-  GIET_NGUOI: 'Giết người, cố ý gây thương tích',
-  MA_TUY: 'Ma túy',
-  HIEP_DAM_CUONG_BAO: 'Hiếp dâm, cưỡng bức',
-  BUON_NGUOI: 'Buôn bán người',
-  THAM_NHUNG: 'Tham nhũng, kinh tế',
-  TO_CHUC_DANH_BAC: 'Tổ chức đánh bạc',
-  PHI_TANG_AN: 'Phí tang án',
-  GIAN_LAN_THUONG_MAI: 'Gian lận thương mại',
-  KHAC: 'Khác'
+  DB: 'Đánh bạc trên không gian mạng',
+  LD: 'Lừa đảo chiếm đoạt tài sản trên không gian mạng',
+  TDD: 'Tín dụng đen',
+  VK: 'Vũ khí, vật liệu nổ, pháo trên không gian mạng',
+  MD: 'Môi giới mại dâm trên không gian mạng',
+  TMDT: 'Thương mại điện tử',
+  MBDL: 'Mua bán dữ liệu',
+  BVTE: 'Bảo vệ trẻ em trên không gian mạng',
+  BC: 'Chuỗi Blockchain',
+  KHXM: 'Khác - Xử lý sau'
 };
 
 export const CATEGORY_COLORS = {
-  CUOP_GIAT_NHAT: '#1D4ED8',
-  GIET_NGUOI: '#B91C1C',
-  MA_TUY: '#2563EB',
-  HIEP_DAM_CUONG_BAO: '#DC2626',
-  BUON_NGUOI: '#3B82F6',
-  THAM_NHUNG: '#991B1B',
-  TO_CHUC_DANH_BAC: '#1E40AF',
-  PHI_TANG_AN: '#EF4444',
-  GIAN_LAN_THUONG_MAI: '#60A5FA',
-  KHAC: '#7F1D1D'
+  DB: '#EF4444',
+  LD: '#F97316',
+  TDD: '#EAB308',
+  VK: '#84CC16',
+  MD: '#22C55E',
+  TMDT: '#14B8A6',
+  MBDL: '#3B82F6',
+  BVTE: '#8B5CF6',
+  BC: '#A855F7',
+  KHXM: '#EC4899'
 };
 
 export const TASK_STATUSES = ['new', 'in_progress', 'review', 'done', 'returned'];

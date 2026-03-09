@@ -1,0 +1,17 @@
+[
+  {
+    "senderId": "e2e-fb-user-001",
+    "text": "E2E-HARNESS: Tôi muốn tố giác một vụ việc nghi liên quan ma túy tại khu phố A.",
+    "messageId": "e2e-mid-1"
+  },
+  {
+    "senderId": "e2e-fb-user-001",
+    "text": "E2E-HARNESS: Sự việc xảy ra khoảng 22h tối qua, có nhiều người tụ tập khả nghi.",
+    "messageId": "e2e-mid-2"
+  },
+  {
+    "senderId": "e2e-fb-user-001",
+    "text": "E2E-HARNESS: Địa điểm gần ngã tư B, mong cơ quan sớm kiểm tra.",
+    "messageId": "e2e-mid-3"
+  }
+]

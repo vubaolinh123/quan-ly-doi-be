@@ -1,6 +1,6 @@
 import Category from '../models/Category.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { successResponse } from '../utils/apiResponse.js';
+import { errorResponse, successResponse } from '../utils/apiResponse.js';
 
 export const createCategory = asyncHandler(async (req, res) => {
   const item = await Category.create(req.body);
@@ -59,22 +59,41 @@ export const getCategoryById = asyncHandler(async (req, res) => {
 });
 
 export const updateCategory = asyncHandler(async (req, res) => {
-  const item = await Category.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-    runValidators: true
-  });
+  const item = await Category.findById(req.params.id);
 
   if (!item) {
     return res.status(404).json({ success: false, message: 'Không tìm thấy hạng mục' });
   }
+
+  if (item.isLocked) {
+    return errorResponse({
+      res,
+      message: 'Hạng mục này được khóa hệ thống, không thể chỉnh sửa',
+      statusCode: 403
+    });
+  }
+
+  Object.assign(item, req.body);
+  await item.save();
 
   return successResponse({ res, message: 'Cập nhật hạng mục thành công', data: item });
 });
 
 export const deleteCategory = asyncHandler(async (req, res) => {
-  const item = await Category.findByIdAndDelete(req.params.id);
+  const item = await Category.findById(req.params.id);
   if (!item) {
     return res.status(404).json({ success: false, message: 'Không tìm thấy hạng mục' });
   }
+
+  if (item.isLocked) {
+    return errorResponse({
+      res,
+      message: 'Hạng mục này được khóa hệ thống, không thể xóa',
+      statusCode: 403
+    });
+  }
+
+  await item.deleteOne();
+
   return successResponse({ res, message: 'Xóa hạng mục thành công', data: item });
 });

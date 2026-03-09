@@ -1,25 +1,29 @@
 import env from '../config/env.js';
 
-export const sendFacebookMessage = async (recipientId, messageText) => {
+const GRAPH_API_BASE = 'https://graph.facebook.com/v20.0';
+
+export const sendFacebookTextMessage = async (recipientId, text) => {
   if (!env.facebookPageAccessToken) {
-    console.log('[FacebookService] No token, skipping send. Message:', messageText);
-    return;
+    console.warn('[facebook.service] Missing FACEBOOK_PAGE_ACCESS_TOKEN, skip send message');
+    return { skipped: true, reason: 'missing_token' };
   }
 
-  const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${env.facebookPageAccessToken}`;
-  const body = {
-    recipient: { id: recipientId },
-    message: { text: messageText }
-  };
-
-  const resp = await fetch(url, {
+  const response = await fetch(`${GRAPH_API_BASE}/me/messages?access_token=${env.facebookPageAccessToken}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      recipient: { id: String(recipientId) },
+      messaging_type: 'RESPONSE',
+      message: { text }
+    })
   });
 
-  if (!resp.ok) {
-    const err = await resp.text();
-    console.error('[FacebookService] Send failed:', err);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Facebook send message failed: ${response.status} ${errorText}`);
   }
+
+  return response.json();
 };

@@ -55,6 +55,13 @@ const taskSchema = new mongoose.Schema(
 
 taskSchema.index({ status: 1, deadline: 1 });
 taskSchema.index({ categoryCode: 1, status: 1 });
+taskSchema.index(
+  { sourceReportId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { sourceReportId: { $type: 'objectId' } }
+  }
+);
 
 const Task = mongoose.model('Task', taskSchema);
 

@@ -1,51 +1,77 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import env from '../config/env.js';
-import { baseSystemPrompt } from '../prompts/system/base-system.prompt.js';
-import { categoryClassifierPrompt } from '../prompts/classification/category-classifier.prompt.js';
-import { validateAiAnalysis, fallbackAnalysis } from '../schemas/ai-analysis.schema.js';
+import {
+  AI_ANALYSIS_SCHEMA,
+  createSafeAiFallback,
+  validateAiAnalysis
+} from '../schemas/ai-analysis.schema.js';
 
-export const analyzeMessages = async (messages) => {
+const parseJsonFromModelText = (text) => {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return null;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+};
+
+const getModelClient = () => {
   if (!env.geminiApiKey) {
-    console.log('[GeminiService] No API key, using mock analysis');
+    return null;
+  }
+  const client = new GoogleGenerativeAI(env.geminiApiKey);
+  return client.getGenerativeModel({ model: env.geminiModel });
+};
+
+export const analyzeWithGemini = async (promptText) => {
+  if (process.env.E2E_MOCK === 'true') {
     return {
-      intent: 'report',
-      suggestedCategoryCode: 'KHAC',
-      confidence: 0.5,
+      intent: 'report_crime',
+      suggestedCategoryCode: 'TDD',
+      confidence: 0.9,
       missingFields: [],
-      followupMessage: null,
-      adminSummary: '[Mock] Nội dung tố giác cần xem xét'
+      followupMessage: 'Cảm ơn bạn đã cung cấp thông tin, chúng tôi đã tiếp nhận để xử lý.',
+      adminSummary: 'E2E mock summary: nghi vấn liên quan ma túy, cần xác minh thực địa.'
     };
   }
 
-  const prompt = categoryClassifierPrompt(messages);
+  const model = getModelClient();
+  if (!model) {
+    console.warn('[gemini.service] Missing GEMINI_API_KEY, returning safe fallback');
+    return createSafeAiFallback();
+  }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${env.geminiModel}:generateContent?key=${env.geminiApiKey}`;
-    const body = {
-      systemInstruction: { parts: [{ text: baseSystemPrompt }] },
-      contents: [{ parts: [{ text: prompt }] }]
-    };
-
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: promptText }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.2
+      }
     });
 
-    if (!resp.ok) throw new Error(`Gemini API error: ${resp.status}`);
+    const text = result?.response?.text?.() || '';
+    const parsed = parseJsonFromModelText(text);
 
-    const result = await resp.json();
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-
-    if (!validateAiAnalysis(parsed)) {
-      console.error('[GeminiService] Schema validation failed, using fallback');
-      return fallbackAnalysis;
+    if (!parsed || !validateAiAnalysis(parsed)) {
+      console.warn('[gemini.service] Invalid model JSON against schema', {
+        schema: AI_ANALYSIS_SCHEMA,
+        raw: text
+      });
+      return createSafeAiFallback();
     }
 
     return parsed;
-  } catch (err) {
-    console.error('[GeminiService] Error:', err.message);
-    return fallbackAnalysis;
+  } catch (error) {
+    console.error('[gemini.service] Gemini call failed', error.message);
+    return createSafeAiFallback();
   }
 };

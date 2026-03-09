@@ -1,11 +1,8 @@
-export const formatAdminSummary = (analysis, messages) => {
-  const msgText = messages.join('\n---\n');
+export const ADMIN_SUMMARY_PROMPT = `Tạo adminSummary tiếng Việt (3-5 gạch đầu dòng) phục vụ cán bộ duyệt.
 
-  return (
-    `📋 *Tố giác mới cần duyệt*\n\n` +
-    `📂 Hạng mục: ${analysis.suggestedCategoryCode || 'Chưa xác định'}\n` +
-    `🎯 Mức tin cậy: ${Math.round((analysis.confidence || 0) * 100)}%\n\n` +
-    `📝 Tóm tắt: ${analysis.adminSummary}\n\n` +
-    `💬 Nội dung gốc:\n${msgText}`
-  );
-};
+Nội dung cần có:
+- Tóm tắt vụ việc chính
+- Dấu hiệu nghiệp vụ nổi bật
+- suggestedCategoryCode và confidence
+- Danh sách missingFields
+- Mức độ ưu tiên xử lý sơ bộ`;

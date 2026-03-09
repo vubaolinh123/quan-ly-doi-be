@@ -7,12 +7,14 @@ import reportRoutes from './report.routes.js';
 import scheduleRoutes from './schedule.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import webhookRoutes from './webhook.routes.js';
+import telegramRoutes from './telegram.routes.js';
 import { protect } from '../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
 router.use('/auth', authRoutes);
 router.use('/webhooks', webhookRoutes);
+router.use('/webhooks/telegram', telegramRoutes);
 router.use('/categories', protect, categoryRoutes);
 router.use('/officers', protect, officerRoutes);
 router.use('/tasks', protect, taskRoutes);
