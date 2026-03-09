@@ -1,6 +1,5 @@
 import mongoose from 'mongoose';
-
-const SHIFT_TYPES = ['S', 'N', 'CT'];
+import { SHIFT_TYPES } from '../constants/domain.constants.js';
 
 const scheduleSchema = new mongoose.Schema(
   {

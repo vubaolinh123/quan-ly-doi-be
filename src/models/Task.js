@@ -1,15 +1,5 @@
 import mongoose from 'mongoose';
-
-const TASK_ACTIVITIES = [
-  'PHAT_HIEN',
-  'DIEU_TRA_XU_LY',
-  'TUYEN_TRUYEN',
-  'PHONG_NGUA',
-  'NGAN_CHAN'
-];
-
-const TASK_PRIORITIES = ['urgent', 'high', 'medium', 'low'];
-const TASK_STATUSES = ['new', 'in_progress', 'review', 'done', 'returned'];
+import { TASK_ACTIVITIES, TASK_PRIORITIES, TASK_STATUSES } from '../constants/domain.constants.js';
 
 const taskSchema = new mongoose.Schema(
   {

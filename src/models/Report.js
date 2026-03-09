@@ -1,7 +1,5 @@
 import mongoose from 'mongoose';
-
-const REPORT_CHANNELS = ['HOTLINE', 'FACEBOOK', 'ZALO', 'EMAIL', 'WEBSITE', 'TRUC_TIEP'];
-const REPORT_STATUSES = ['pending_approval', 'approved', 'rejected'];
+import { REPORT_CHANNELS, REPORT_STATUSES } from '../constants/domain.constants.js';
 
 const reportSchema = new mongoose.Schema(
   {

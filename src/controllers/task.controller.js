@@ -1,12 +1,32 @@
 import mongoose from 'mongoose';
 import Task from '../models/Task.js';
+import { TASK_STATUSES } from '../constants/domain.constants.js';
+import { assignOfficerToTask } from '../services/assignment.service.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { successResponse } from '../utils/apiResponse.js';
 
-const allowedStatuses = ['new', 'in_progress', 'review', 'done', 'returned'];
+const allowedStatuses = TASK_STATUSES;
 
 export const createTask = asyncHandler(async (req, res) => {
-  const item = await Task.create(req.body);
+  const payload = { ...req.body };
+
+  if (!payload.assignee) {
+    try {
+      const officer = await assignOfficerToTask(payload.categoryCode);
+      payload.assignee = officer._id;
+    } catch (error) {
+      if (error.code === 'NO_OFFICER_FOR_CATEGORY') {
+        return res.status(422).json({
+          success: false,
+          message: error.message
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  const item = await Task.create(payload);
   const populated = await Task.findById(item._id).populate('assignee').populate('sourceReportId');
 
   return successResponse({

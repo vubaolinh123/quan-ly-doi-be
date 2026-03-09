@@ -19,6 +19,10 @@ const categorySchema = new mongoose.Schema(
       required: [true, 'Màu hạng mục là bắt buộc'],
       trim: true
     },
+    assignmentCursor: {
+      type: Number,
+      default: 0
+    },
     sortOrder: {
       type: Number,
       default: 0
