@@ -1,19 +1,21 @@
 import express from 'express';
 import authRoutes from './auth.routes.js';
-import teamRoutes from './team.routes.js';
-import projectRoutes from './project.routes.js';
-import dutyScheduleRoutes from './dutySchedule.routes.js';
-import officialDispatchRoutes from './officialDispatch.routes.js';
-import basicOperationRoutes from './basicOperation.routes.js';
+import categoryRoutes from './category.routes.js';
+import officerRoutes from './officer.routes.js';
+import taskRoutes from './task.routes.js';
+import reportRoutes from './report.routes.js';
+import scheduleRoutes from './schedule.routes.js';
+import dashboardRoutes from './dashboard.routes.js';
 import { protect } from '../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
 router.use('/auth', authRoutes);
-router.use('/teams', protect, teamRoutes);
-router.use('/projects', protect, projectRoutes);
-router.use('/duty-schedules', protect, dutyScheduleRoutes);
-router.use('/official-dispatches', protect, officialDispatchRoutes);
-router.use('/basic-operations', protect, basicOperationRoutes);
+router.use('/categories', protect, categoryRoutes);
+router.use('/officers', protect, officerRoutes);
+router.use('/tasks', protect, taskRoutes);
+router.use('/reports', protect, reportRoutes);
+router.use('/schedules', protect, scheduleRoutes);
+router.use('/dashboard', protect, dashboardRoutes);
 
 export default router;
