@@ -9,6 +9,21 @@ const app = express();
 
 app.use(helmet());
 app.use(cors());
+app.use((req, res, next) => {
+  if (req.path === '/api/webhooks/facebook' && req.method === 'POST') {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      data += chunk;
+    });
+    req.on('end', () => {
+      req.rawBody = data;
+      next();
+    });
+  } else {
+    next();
+  }
+});
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));

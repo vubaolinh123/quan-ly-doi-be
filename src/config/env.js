@@ -9,7 +9,16 @@ const env = {
   jwtSecret: process.env.JWT_SECRET || 'change_this_jwt_secret',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   adminEmail: process.env.ADMIN_EMAIL || 'admin@cshs.local',
-  adminPassword: process.env.ADMIN_PASSWORD || 'Admin@123456'
+  adminPassword: process.env.ADMIN_PASSWORD || 'Admin@123456',
+  facebookVerifyToken: process.env.FACEBOOK_VERIFY_TOKEN || 'fb_verify_token_change_me',
+  facebookPageAccessToken: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || '',
+  facebookAppSecret: process.env.FACEBOOK_APP_SECRET || '',
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+  telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
+  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || '',
+  messageBatchWindowMs: Number(process.env.MESSAGE_BATCH_WINDOW_MS) || 5000
 };
 
 export default env;
