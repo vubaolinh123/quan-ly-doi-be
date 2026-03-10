@@ -83,7 +83,18 @@ const reportSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
       default: null
-    }
+    },
+    aiEnabled: {
+      type: Boolean,
+      default: true
+    },
+    notes: [
+      {
+        text: { type: String, trim: true },
+        source: { type: String, enum: ['ai', 'admin'], default: 'ai' },
+        createdAt: { type: Date, default: Date.now }
+      }
+    ]
   },
   {
     timestamps: true
@@ -92,6 +103,7 @@ const reportSchema = new mongoose.Schema(
 
 reportSchema.index({ status: 1, createdAt: -1 });
 reportSchema.index({ channel: 1, status: 1 });
+reportSchema.index({ 'reporterInfo.facebookId': 1, status: 1 });
 
 const Report = mongoose.model('Report', reportSchema);
 

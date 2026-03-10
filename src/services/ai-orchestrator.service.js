@@ -53,6 +53,17 @@ const getConversationHistory = async (senderId) => {
 };
 
 /**
+ * Find an existing pending Report for this Facebook sender.
+ * Returns null if none found.
+ */
+const findPendingReportForSender = async (senderId) => {
+  return Report.findOne({
+    'reporterInfo.facebookId': senderId,
+    status: 'pending_approval'
+  }).lean();
+};
+
+/**
  * Persist the current inbound batch and (optionally) the outbound AI reply
  * to the conversation log so future batches can read them as history.
  */
@@ -162,6 +173,18 @@ export const processBatch = async ({ senderId, messages }) => {
   // non-report conversations accumulate context for future batches.
   await saveToHistory(senderId, messages, analysis.followupMessage || null);
 
+  // ── Step 3.5: Bail if this sender has a pending Report with AI disabled ───
+  // We must check BEFORE doing anything else so we don't create duplicate Reports
+  // or send AI replies when the admin has intentionally silenced the bot.
+  const openReport = await findPendingReportForSender(senderId);
+  if (openReport && openReport.aiEnabled === false) {
+    console.info(
+      '[ai-orchestrator] AI disabled for report %s — skipping reply for sender %s',
+      openReport._id, senderId
+    );
+    return null;
+  }
+
   // ── Step 4: Classification gate ──────────────────────────────────────────
   // Only persist a Report when the AI is confident this is a real crime report.
   if (analysis.intent !== REPORT_INTENT || (analysis.confidence ?? 0) < CONFIDENCE_THRESHOLD) {
@@ -181,7 +204,38 @@ export const processBatch = async ({ senderId, messages }) => {
     return null;
   }
 
-  // ── Step 5: Persist Report ────────────────────────────────────────────────
+  // ── Step 5: Append to existing pending Report OR create a new one ─────────
+  // If there is already an open pending Report for this sender (and AI is still
+  // enabled — checked above), we append AI-derived context as a note instead of
+  // creating a duplicate Report.
+  if (openReport) {
+    console.info(
+      '[ai-orchestrator] Appending note to existing pending report %s for sender %s',
+      openReport._id, senderId
+    );
+
+    await Report.findByIdAndUpdate(openReport._id, {
+      $push: {
+        notes: {
+          text: analysis.adminSummary || messages.map((m) => m.text).join(' '),
+          source: 'ai',
+          createdAt: new Date()
+        }
+      }
+    });
+
+    try {
+      if (analysis.followupMessage) {
+        await sendFacebookTextMessage(senderId, analysis.followupMessage);
+      }
+    } catch (err) {
+      console.error('[ai-orchestrator] Facebook followup (existing report) failed:', err.message);
+    }
+
+    return openReport;
+  }
+
+  // ── Step 5b: No existing report — create a new one ───────────────────────
   const reportCode = await nextReportCode();
 
   const report = await Report.create({

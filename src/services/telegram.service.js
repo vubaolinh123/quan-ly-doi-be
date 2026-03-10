@@ -106,7 +106,7 @@ const buildInlineKeyboard = (reportId) => {
     [
       { text: '✅ Approve', callback_data: buildCallback('approve', reportId) },
       { text: '❌ Reject', callback_data: buildCallback('reject', reportId) },
-      { text: '🔄 Change Category', callback_data: buildCallback('change_category_menu', reportId) }
+      { text: '🤖 Tắt AI', callback_data: buildCallback('toggle_ai', reportId) }
     ],
     ...categoryRows
   ];
@@ -133,10 +133,17 @@ export const editMessageAfterDecision = async (messageId, decision) => {
     return { skipped: true, reason: 'missing_chat_or_message_id' };
   }
 
-  return telegramRequest('editMessageText', {
+  const payload = {
     chat_id: decision.chatId,
     message_id: Number(messageId),
-    text: decision.text,
-    reply_markup: { inline_keyboard: [] }
-  });
+    text: decision.text
+  };
+
+  // For non-final actions (like toggle_ai) keep the keyboard active so
+  // admins can still approve / reject without re-finding the message.
+  if (!decision.keepKeyboard) {
+    payload.reply_markup = { inline_keyboard: [] };
+  }
+
+  return telegramRequest('editMessageText', payload);
 };

@@ -167,3 +167,19 @@ export const rejectReport = asyncHandler(async (req, res) => {
 
   return successResponse({ res, message: 'Đã từ chối tố giác', data: item });
 });
+
+export const toggleAi = asyncHandler(async (req, res) => {
+  const item = await Report.findById(req.params.id);
+  if (!item) {
+    return res.status(404).json({ success: false, message: 'Không tìm thấy tố giác' });
+  }
+
+  item.aiEnabled = !item.aiEnabled;
+  await item.save();
+
+  return successResponse({
+    res,
+    message: item.aiEnabled ? 'Đã bật AI cho tố giác' : 'Đã tắt AI cho tố giác',
+    data: item
+  });
+});

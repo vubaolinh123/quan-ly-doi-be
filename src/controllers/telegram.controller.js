@@ -6,19 +6,24 @@ import {
   rejectReport
 } from '../services/report-approval.service.js';
 import { editMessageAfterDecision } from '../services/telegram.service.js';
+import Report from '../models/Report.js';
 
 const parseCallbackData = (raw) => {
   const [action, reportId, categoryCode] = String(raw || '').split('|');
   return { action, reportId, categoryCode };
 };
 
-const buildDecisionText = ({ reportCode, resultStatus, action, categoryCode }) => {
+const buildDecisionText = ({ reportCode, resultStatus, action, categoryCode, aiEnabled }) => {
   if (resultStatus === 'already_processed') {
     return `ℹ️ Báo cáo ${reportCode} đã được xử lý trước đó.`;
   }
 
   if (action === 'reject') {
     return `❌ Báo cáo ${reportCode} đã bị từ chối.`;
+  }
+
+  if (action === 'toggle_ai') {
+    return `🤖 AI đã ${aiEnabled ? 'bật' : 'tắt'} cho báo cáo ${reportCode}.`;
   }
 
   if (action === 'change_category') {
@@ -58,6 +63,18 @@ export const receiveTelegramWebhook = asyncHandler(async (req, res) => {
       message: 'Telegram callback processed',
       data: { status: 'category_menu_opened' }
     });
+  } else if (action === 'toggle_ai') {
+    const report = await Report.findById(reportId);
+    if (!report || report.status !== 'pending_approval') {
+      return successResponse({
+        res,
+        message: 'Telegram callback processed',
+        data: { status: 'not_pending' }
+      });
+    }
+    report.aiEnabled = !report.aiEnabled;
+    await report.save();
+    outcome = { status: 'toggled', report, aiEnabled: report.aiEnabled };
   } else {
     return successResponse({
       res,
@@ -70,13 +87,15 @@ export const receiveTelegramWebhook = asyncHandler(async (req, res) => {
     reportCode: outcome.report.reportCode,
     resultStatus: outcome.status,
     action,
-    categoryCode
+    categoryCode,
+    aiEnabled: outcome.aiEnabled
   });
 
   try {
     await editMessageAfterDecision(callbackQuery.message?.message_id, {
       chatId: callbackQuery.message?.chat?.id,
-      text
+      text,
+      keepKeyboard: action === 'toggle_ai'
     });
   } catch (error) {
     console.error('[telegram.controller] edit message failed', error.message);
