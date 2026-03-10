@@ -1,4 +1,5 @@
 import Report from '../models/Report.js';
+import Task from '../models/Task.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { successResponse } from '../utils/apiResponse.js';
 import { editMessageAfterDecision } from '../services/telegram.service.js';
@@ -182,4 +183,16 @@ export const toggleAi = asyncHandler(async (req, res) => {
     message: item.aiEnabled ? 'Đã bật AI cho tố giác' : 'Đã tắt AI cho tố giác',
     data: item
   });
+});
+
+export const getLinkedTask = asyncHandler(async (req, res) => {
+  const task = await Task.findOne({ sourceReportId: req.params.id })
+    .populate('assignee', 'hoTen capBac')
+    .lean();
+
+  if (!task) {
+    return res.status(404).json({ success: false, message: 'Không tìm thấy công việc liên kết' });
+  }
+
+  return successResponse({ res, message: 'Lấy công việc liên kết thành công', data: task });
 });

@@ -10,12 +10,8 @@ export const verifyFacebookSignature = (req, res, next) => {
 
   // ── 1. Pre-condition checks ───────────────────────────────────────────────
   if (!appSecret) {
-    console.warn(
-      '[fb-sig] ⚠️  FACEBOOK_APP_SECRET not configured — signature verification DISABLED. ' +
-      'All Facebook webhook POSTs will be accepted without HMAC check. ' +
-      'Set FACEBOOK_APP_SECRET in .env to enable verification.'
-    );
-    // Still parse the raw body so downstream handlers receive a JS object
+    // Signature verification is disabled (FACEBOOK_APP_SECRET not set).
+    // Still parse the raw body so downstream handlers receive a JS object.
     if (Buffer.isBuffer(rawBody)) {
       req.rawBody = rawBody;
       try {
