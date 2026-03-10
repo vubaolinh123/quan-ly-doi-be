@@ -1,6 +1,8 @@
 import Report from '../models/Report.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { successResponse } from '../utils/apiResponse.js';
+import { editMessageAfterDecision } from '../services/telegram.service.js';
+import env from '../config/env.js';
 
 const allowedStatuses = ['pending_approval', 'approved', 'rejected'];
 
@@ -88,4 +90,80 @@ export const deleteReport = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: 'Không tìm thấy tố giác' });
   }
   return successResponse({ res, message: 'Xóa tố giác thành công', data: item });
+});
+
+// ── Web decision endpoints ────────────────────────────────────────────────────
+
+export const approveReport = asyncHandler(async (req, res) => {
+  const { finalCategoryCode, note } = req.body ?? {};
+  const adminName = req.user?.username || req.user?.name || req.user?.email || 'admin';
+
+  const update = {
+    status: 'approved',
+    approvedBy: adminName,
+    approvedAt: new Date(),
+    decisionSource: 'web',
+    ...(finalCategoryCode ? { finalCategoryCode } : {}),
+  };
+
+  const item = await Report.findByIdAndUpdate(req.params.id, update, {
+    new: true,
+    runValidators: true
+  });
+
+  if (!item) {
+    return res.status(404).json({ success: false, message: 'Không tìm thấy tố giác' });
+  }
+
+  // Sync decision to Telegram so the approval message is updated
+  try {
+    if (item.decisionMessageId && env.telegramChatId) {
+      const noteText = note ? `\nGhi chú: ${note}` : '';
+      await editMessageAfterDecision(item.decisionMessageId, {
+        chatId: env.telegramChatId,
+        text: `✅ ĐÃ DUYỆT (web)\nMã: ${item.reportCode}\nDuyệt bởi: ${adminName}${noteText}`
+      });
+    }
+  } catch (err) {
+    console.warn('[report] Telegram edit failed on web approve:', err.message);
+  }
+
+  return successResponse({ res, message: 'Đã duyệt tố giác', data: item });
+});
+
+export const rejectReport = asyncHandler(async (req, res) => {
+  const { reason } = req.body ?? {};
+  const adminName = req.user?.username || req.user?.name || req.user?.email || 'admin';
+
+  const update = {
+    status: 'rejected',
+    rejectedBy: adminName,
+    rejectedAt: new Date(),
+    decisionSource: 'web',
+    ...(reason ? { rejectedReason: reason } : {}),
+  };
+
+  const item = await Report.findByIdAndUpdate(req.params.id, update, {
+    new: true,
+    runValidators: true
+  });
+
+  if (!item) {
+    return res.status(404).json({ success: false, message: 'Không tìm thấy tố giác' });
+  }
+
+  // Sync decision to Telegram
+  try {
+    if (item.decisionMessageId && env.telegramChatId) {
+      const reasonText = reason ? `\nLý do: ${reason}` : '';
+      await editMessageAfterDecision(item.decisionMessageId, {
+        chatId: env.telegramChatId,
+        text: `❌ ĐÃ TỪ CHỐI (web)\nMã: ${item.reportCode}\nTừ chối bởi: ${adminName}${reasonText}`
+      });
+    }
+  } catch (err) {
+    console.warn('[report] Telegram edit failed on web reject:', err.message);
+  }
+
+  return successResponse({ res, message: 'Đã từ chối tố giác', data: item });
 });

@@ -10,6 +10,10 @@ import { ADMIN_SUMMARY_PROMPT } from '../prompts/summary/admin-summary.prompt.js
 
 let aiCallCounter = 0;
 
+// ── Classification config ─────────────────────────────────────────────────────
+const REPORT_INTENT = 'report_crime';
+const CONFIDENCE_THRESHOLD = 0.5; // minimum confidence to treat as a real report
+
 const nextReportCode = async () => {
   const datePrefix = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const seed = Math.floor(Math.random() * 9000) + 1000;
@@ -53,6 +57,32 @@ export const processBatch = async ({ senderId, messages }) => {
   aiCallCounter += 1;
   const aiPrompt = buildPrompt({ senderId, messages });
   const analysis = await analyzeWithGemini(aiPrompt);
+
+  // ── Classification gate ───────────────────────────────────────────────────
+  // Only persist a Report when the AI is confident this is an actual crime report.
+  // Non-report messages (questions, complaints, spam, etc.) are acknowledged via
+  // Facebook follow-up but NOT saved to the Report collection.
+  if (analysis.intent !== REPORT_INTENT || (analysis.confidence ?? 0) < CONFIDENCE_THRESHOLD) {
+    console.info(
+      '[ai-orchestrator] Batch classified as NON-report ' +
+      '(intent=%s, confidence=%s) — skipping persistence',
+      analysis.intent,
+      analysis.confidence ?? 'N/A'
+    );
+
+    // Still send a helpful Facebook reply so the sender isn't left in silence
+    try {
+      if (analysis.followupMessage) {
+        await sendFacebookTextMessage(senderId, analysis.followupMessage);
+      }
+    } catch (error) {
+      console.error('[ai-orchestrator] Facebook followup (non-report) failed', error.message);
+    }
+
+    return null;
+  }
+
+  // ── Persist as Report ─────────────────────────────────────────────────────
   const reportCode = await nextReportCode();
 
   const report = await Report.create({

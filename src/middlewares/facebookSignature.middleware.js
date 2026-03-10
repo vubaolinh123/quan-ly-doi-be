@@ -10,8 +10,22 @@ export const verifyFacebookSignature = (req, res, next) => {
 
   // ── 1. Pre-condition checks ───────────────────────────────────────────────
   if (!appSecret) {
-    console.error('[fb-sig] ❌ 403 — FACEBOOK_APP_SECRET is not set in env');
-    return res.status(403).json({ success: false, message: 'Thiếu hoặc sai chữ ký xác thực' });
+    console.warn(
+      '[fb-sig] ⚠️  FACEBOOK_APP_SECRET not configured — signature verification DISABLED. ' +
+      'All Facebook webhook POSTs will be accepted without HMAC check. ' +
+      'Set FACEBOOK_APP_SECRET in .env to enable verification.'
+    );
+    // Still parse the raw body so downstream handlers receive a JS object
+    if (Buffer.isBuffer(rawBody)) {
+      req.rawBody = rawBody;
+      try {
+        req.body = JSON.parse(rawBody.toString('utf8'));
+      } catch (parseError) {
+        console.error('[fb-sig] ❌ 400 — JSON parse failed (no-secret path):', parseError.message);
+        return res.status(400).json({ success: false, message: 'Dữ liệu gửi lên không hợp lệ' });
+      }
+    }
+    return next();
   }
 
   if (!signature) {
