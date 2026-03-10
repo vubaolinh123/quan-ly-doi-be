@@ -107,7 +107,11 @@ const processMessagingEvent = (messagingEvent) => {
 export const receiveFacebookWebhook = asyncHandler(async (req, res) => {
   const body = req.body;
 
+  console.log('[webhook/fb] POST received — object=%s, entries=%d',
+    body?.object, body?.entry?.length ?? 0);
+
   if (body?.object !== 'page') {
+    console.warn('[webhook/fb] ❌ 404 — object is not "page": %s', body?.object);
     return res.status(404).json({ success: false, message: 'Not a page event' });
   }
 
@@ -116,11 +120,15 @@ export const receiveFacebookWebhook = asyncHandler(async (req, res) => {
 
   // Process events outside the response cycle so errors don't trigger "headers already sent"
   try {
+    let eventCount = 0;
     for (const entry of body.entry ?? []) {
       for (const messagingEvent of entry.messaging ?? []) {
+        eventCount++;
         processMessagingEvent(messagingEvent);
       }
     }
+    console.log('[webhook/fb] ✅ Processed %d event(s) from %d entr(ies)',
+      eventCount, body.entry?.length ?? 0);
   } catch (err) {
     console.error('[webhook/fb] Error processing events:', err.message);
   }
