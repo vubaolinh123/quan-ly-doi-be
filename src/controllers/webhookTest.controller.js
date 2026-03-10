@@ -6,26 +6,29 @@ import { messageBatchService } from '../services/message-batch.service.js';
 // Returns the current Facebook webhook configuration status.
 // Exposes the verify token value (needed by the UI to copy-paste into FB Dev
 // Console) but never exposes appSecret or pageAccessToken values.
+//
+// "Configured" simply means the env var is non-empty — no hardcoded default
+// comparison so any value the operator sets will be accepted.
 // ─────────────────────────────────────────────────────────────────────────────
 export const getWebhookConfig = asyncHandler(async (req, res) => {
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-  const host     = req.headers['x-forwarded-host']  || req.headers.host || 'localhost:5000';
+  const protocol   = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host       = req.headers['x-forwarded-host']  || req.headers.host || 'localhost:5000';
   const webhookUrl = `${protocol}://${host}/api/webhooks/facebook`;
 
-  const DEFAULT_TOKEN = 'supersecret';
+  const verifyTokenSet      = Boolean(env.facebookVerifyToken);
+  const appSecretSet        = Boolean(env.facebookAppSecret);
+  const pageAccessTokenSet  = Boolean(env.facebookPageAccessToken);
 
   res.json({
     success: true,
     data: {
       webhookUrl,
-      // Expose the verify token so the UI can copy it to FB Dev Console
-      verifyToken: (env.facebookVerifyToken && env.facebookVerifyToken !== DEFAULT_TOKEN)
-        ? env.facebookVerifyToken
-        : null,
-      verifyTokenSet:
-        Boolean(env.facebookVerifyToken) && env.facebookVerifyToken !== DEFAULT_TOKEN,
-      appSecretSet:        Boolean(env.facebookAppSecret),
-      pageAccessTokenSet:  Boolean(env.facebookPageAccessToken),
+      // Expose the raw token value so the admin can copy it to FB Dev Console.
+      // Only returned when the env var is actually set.
+      verifyToken: verifyTokenSet ? env.facebookVerifyToken : null,
+      verifyTokenSet,
+      appSecretSet,
+      pageAccessTokenSet,
     },
   });
 });
@@ -38,21 +41,20 @@ export const getWebhookConfig = asyncHandler(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 export const testVerification = asyncHandler(async (req, res) => {
   const token = env.facebookVerifyToken;
-  const DEFAULT_TOKEN = 'supersecret';
 
-  if (!token || token === DEFAULT_TOKEN) {
+  if (!token) {
     return res.status(400).json({
       ok: false,
       error:
         'FACEBOOK_VERIFY_TOKEN chưa được cấu hình. ' +
-        'Hãy đặt giá trị hợp lệ trong file backend/.env và khởi động lại server.',
+        'Hãy đặt giá trị trong file backend/.env rồi khởi động lại server.',
     });
   }
 
   // Mimic exactly what Facebook sends in the GET verification request
   const challenge = `challenge-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const sentMode  = 'subscribe';
-  const sentToken = token; // simulate FB using the correct token
+  const sentToken = token; // simulate FB sending the correct token
 
   if (sentMode === 'subscribe' && sentToken === token) {
     return res.json({

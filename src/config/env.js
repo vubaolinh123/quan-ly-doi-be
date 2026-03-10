@@ -16,9 +16,9 @@ const env = {
   adminEmail: process.env.ADMIN_EMAIL || 'admin@cshs.local',
   adminPassword: process.env.ADMIN_PASSWORD || 'Admin@123456',
   // Facebook
-  facebookVerifyToken: process.env.FACEBOOK_VERIFY_TOKEN || 'change_this_fb_verify_token',
-  facebookPageAccessToken: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || '',
-  facebookAppSecret: process.env.FACEBOOK_APP_SECRET || '',
+  facebookVerifyToken:      process.env.FACEBOOK_VERIFY_TOKEN      || '',
+  facebookPageAccessToken:  process.env.FACEBOOK_PAGE_ACCESS_TOKEN || '',
+  facebookAppSecret:        process.env.FACEBOOK_APP_SECRET        || '',
   // Gemini
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
