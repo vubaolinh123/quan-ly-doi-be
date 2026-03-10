@@ -12,7 +12,7 @@ export const getWebhookConfig = asyncHandler(async (req, res) => {
   const host     = req.headers['x-forwarded-host']  || req.headers.host || 'localhost:5000';
   const webhookUrl = `${protocol}://${host}/api/webhooks/facebook`;
 
-  const DEFAULT_TOKEN = 'change_this_fb_verify_token';
+  const DEFAULT_TOKEN = 'supersecret';
 
   res.json({
     success: true,
@@ -38,7 +38,7 @@ export const getWebhookConfig = asyncHandler(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 export const testVerification = asyncHandler(async (req, res) => {
   const token = env.facebookVerifyToken;
-  const DEFAULT_TOKEN = 'change_this_fb_verify_token';
+  const DEFAULT_TOKEN = 'supersecret';
 
   if (!token || token === DEFAULT_TOKEN) {
     return res.status(400).json({
