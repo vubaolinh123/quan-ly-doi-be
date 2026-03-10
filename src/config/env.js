@@ -26,8 +26,8 @@ const env = {
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || 'change_this_tg_secret',
-  // Batching
-  messageBatchWindowMs: toPositiveInt(process.env.MESSAGE_BATCH_WINDOW_MS, 5000)
+  // Batching — default 10 s so users have time to type multi-sentence reports
+  messageBatchWindowMs: toPositiveInt(process.env.MESSAGE_BATCH_WINDOW_MS, 10000)
 };
 
 export default env;
