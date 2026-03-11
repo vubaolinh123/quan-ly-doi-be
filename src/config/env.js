@@ -21,7 +21,7 @@ const env = {
   facebookAppSecret:        process.env.FACEBOOK_APP_SECRET        || '',
   // Gemini
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
   // Telegram — bot gửi thông báo vào nhóm chat chung
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   // ID nhóm chat (số âm, vd: -1001234567890). Fallback TELEGRAM_CHAT_ID để tương thích ngược.

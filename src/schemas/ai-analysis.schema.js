@@ -3,6 +3,14 @@ import { CATEGORY_CODES } from '../constants/domain.constants.js';
 export const AI_INTENTS = ['report_crime', 'ask_info', 'complaint', 'other'];
 export const AI_CATEGORY_CODES = Object.keys(CATEGORY_CODES);
 
+/**
+ * When the sender already has a pending report:
+ *   "new_report"                  → this message is about a completely different incident
+ *   "supplement_existing_report"  → this message adds info to the existing pending report
+ * When there is no pending report, this field is not meaningful; orchestrator defaults to new_report.
+ */
+export const AI_REPORT_ACTIONS = ['new_report', 'supplement_existing_report'];
+
 export const AI_ANALYSIS_SCHEMA = {
   type: 'object',
   required: [
@@ -21,7 +29,9 @@ export const AI_ANALYSIS_SCHEMA = {
     followupMessage: { type: 'string' },
     adminSummary: { type: ['string', 'null'] },
     // noteSummary is optional — only populated when appending to an existing report
-    noteSummary: { type: 'string' }
+    noteSummary: { type: 'string' },
+    // reportAction is optional — only meaningful when sender has a pending report
+    reportAction: { type: 'string', enum: AI_REPORT_ACTIONS }
   }
 };
 
@@ -76,6 +86,11 @@ export const validateAiAnalysis = (value) => {
     return false;
   }
 
+  // reportAction is optional — validate only when present
+  if ('reportAction' in value && !AI_REPORT_ACTIONS.includes(value.reportAction)) {
+    return false;
+  }
+
   return true;
 };
 
@@ -87,5 +102,6 @@ export const createSafeAiFallback = () => ({
   followupMessage:
     'Vui lòng cung cấp họ tên, số điện thoại, thời gian và địa điểm xảy ra vụ việc để chúng tôi tiếp nhận đầy đủ.',
   adminSummary: 'Chưa đủ dữ liệu để phân tích. Cần bổ sung thêm thông tin từ người gửi.',
-  noteSummary: 'Người dân gửi thêm thông tin nhưng chưa đủ để phân tích.'
+  noteSummary: 'Người dân gửi thêm thông tin nhưng chưa đủ để phân tích.',
+  reportAction: 'supplement_existing_report'
 });

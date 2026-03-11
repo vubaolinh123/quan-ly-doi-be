@@ -96,14 +96,16 @@ const saveToHistory = async (senderId, messages, outboundText) => {
  *   1. System-level instructions (persona, task, category codes, …)
  *   2. ── LỊCH SỬ HỘI THOẠI ── (if any prior messages exist for this sender)
  *      Each line: [ISO timestamp] USER|AI: <text>
- *   3. ── TIN NHẮN MỚI CẦN PHÂN TÍCH ──
+ *   3. ── BÁO CÁO ĐANG CHỜ DUYỆT ── (if sender already has a pending report)
+ *      Informs AI about the open report so it can decide: supplement vs new incident
+ *   4. ── TIN NHẮN MỚI CẦN PHÂN TÍCH ──
  *      Numbered list of messages in the current batch
- *   4. JSON output format spec
+ *   5. JSON output format spec
  *
  * Including history prevents the AI from repeating follow-up questions that
  * were already asked in an earlier batch window.
  */
-const buildPrompt = ({ senderId, messages, history }) => {
+const buildPrompt = ({ senderId, messages, history, openReport }) => {
   // ── Current batch transcript ──────────────────────────────────────────────
   const transcript = messages
     .map((m, idx) =>
@@ -127,12 +129,43 @@ const buildPrompt = ({ senderId, messages, history }) => {
         '(Không có lịch sử hội thoại — đây là tin nhắn đầu tiên từ người dùng này.)',
       ];
 
+  // ── Existing pending report section (if any) ─────────────────────────────
+  const openReportLines = openReport
+    ? [
+        '',
+        '=== BÁO CÁO ĐANG CHỜ DUYỆT CỦA NGƯỜI GỬI NÀY ===',
+        `Mã báo cáo : ${openReport.reportCode}`,
+        `Danh mục   : ${openReport.categoryCode}`,
+        `Tóm tắt AI : ${openReport.aiAnalysis?.summary || '(chưa có)'}`,
+        `Nội dung gốc: ${(openReport.content || '').slice(0, 400)}`,
+        '=== HẾT THÔNG TIN BÁO CÁO ===',
+        '',
+        '⚠️ YÊU CẦU QUAN TRỌNG — BÁO CÁO ĐANG MỞ:',
+        'Người gửi này đã có 1 báo cáo đang chờ duyệt (thông tin ở trên).',
+        'Bạn PHẢI quyết định tin nhắn mới này thuộc trường hợp nào:',
+        '  • reportAction = "supplement_existing_report"',
+        '    → Nếu tin nhắn mới BỔ SUNG hoặc làm rõ thêm cho VỤ VIỆC ĐÃ BÁO CÁO ở trên.',
+        '  • reportAction = "new_report"',
+        '    → Nếu tin nhắn mới là VỤ VIỆC KHÁC HOÀN TOÀN (khác địa điểm, khác thời gian, khác loại tội phạm).',
+        'Không được bỏ qua field reportAction khi có báo cáo đang mở.',
+      ]
+    : [
+        '',
+        '(Người gửi này chưa có báo cáo nào đang chờ duyệt. reportAction = "new_report".)',
+      ];
+
+  // ── JSON format spec ──────────────────────────────────────────────────────
+  const reportActionNote = openReport
+    ? '"reportAction":"new_report|supplement_existing_report",'
+    : '';
+
   return [
     BASE_SYSTEM_PROMPT,
     buildCategoryClassifierPrompt(),
     INTAKE_FOLLOWUP_PROMPT,
     ADMIN_SUMMARY_PROMPT,
     ...historyLines,
+    ...openReportLines,
     '',
     `senderId: ${senderId}`,
     'Tin nhắn mới cần phân tích:',
@@ -142,8 +175,9 @@ const buildPrompt = ({ senderId, messages, history }) => {
     'ĐỪNG hỏi lại — hãy chuyển sang bước tiếp theo hoặc xác nhận đã tiếp nhận.',
     '',
     'JSON output format:',
-    '{"intent":"report_crime|ask_info|complaint|other","suggestedCategoryCode":"<CATEGORY_CODE>",' +
-    '"confidence":0.0,"missingFields":["field1"],"followupMessage":"...","adminSummary":"...","noteSummary":"..."}'
+    `{"intent":"report_crime|ask_info|complaint|other","suggestedCategoryCode":"<CATEGORY_CODE>",` +
+    `"confidence":0.0,"missingFields":["field1"],"followupMessage":"...","adminSummary":"...",` +
+    `"noteSummary":"...",${reportActionNote}}`
   ].join('\n');
 };
 
@@ -159,24 +193,12 @@ export const processBatch = async ({ senderId, messages }) => {
   // (they appear separately in the "new messages" section of the prompt).
   const history = await getConversationHistory(senderId);
 
-  console.info(
-    '[ai-orchestrator] Processing batch for sender=%s | batch=%d msg(s) | history=%d msg(s)',
-    senderId, messages.length, history.length
-  );
-
-  // ── Step 2: Call Gemini with history-enriched prompt ─────────────────────
-  const aiPrompt = buildPrompt({ senderId, messages, history });
-  const analysis = await analyzeWithGemini(aiPrompt);
-
-  // ── Step 3: Persist conversation (inbound batch + outbound AI reply) ──────
-  // Done immediately after AI responds, BEFORE the classification gate, so even
-  // non-report conversations accumulate context for future batches.
-  await saveToHistory(senderId, messages, analysis.followupMessage || null);
-
-  // ── Step 3.5: Bail if this sender has a pending Report with AI disabled ───
-  // We must check BEFORE doing anything else so we don't create duplicate Reports
-  // or send AI replies when the admin has intentionally silenced the bot.
+  // ── Step 1.5: Check for an existing pending Report ───────────────────────
+  // Must happen BEFORE calling Gemini so we can inject the open report's context
+  // into the prompt and let the AI decide: supplement vs new incident.
   const openReport = await findPendingReportForSender(senderId);
+
+  // Bail early if AI is disabled for this report
   if (openReport && openReport.aiEnabled === false) {
     console.info(
       '[ai-orchestrator] AI disabled for report %s — skipping reply for sender %s',
@@ -184,6 +206,20 @@ export const processBatch = async ({ senderId, messages }) => {
     );
     return null;
   }
+
+  console.info(
+    '[ai-orchestrator] Processing batch for sender=%s | batch=%d msg(s) | history=%d msg(s) | openReport=%s',
+    senderId, messages.length, history.length, openReport?._id ?? 'none'
+  );
+
+  // ── Step 2: Call Gemini with history-enriched prompt ─────────────────────
+  const aiPrompt = buildPrompt({ senderId, messages, history, openReport });
+  const analysis = await analyzeWithGemini(aiPrompt);
+
+  // ── Step 3: Persist conversation (inbound batch + outbound AI reply) ──────
+  // Done immediately after AI responds, BEFORE the classification gate, so even
+  // non-report conversations accumulate context for future batches.
+  await saveToHistory(senderId, messages, analysis.followupMessage || null);
 
   // ── Step 4: Classification gate ──────────────────────────────────────────
   // Only persist a Report when the AI is confident this is a real crime report.
@@ -205,13 +241,13 @@ export const processBatch = async ({ senderId, messages }) => {
   }
 
   // ── Step 5: Append to existing pending Report OR create a new one ─────────
-  // If there is already an open pending Report for this sender (and AI is still
-  // enabled — checked above), we append AI-derived context as a note instead of
-  // creating a duplicate Report.
-  if (openReport) {
+  // Use AI's reportAction field to decide:
+  //   "supplement_existing_report" → append note to the open report
+  //   "new_report" (or absent)    → create a fresh report
+  if (openReport && analysis.reportAction !== 'new_report') {
     console.info(
-      '[ai-orchestrator] Appending note to existing pending report %s for sender %s',
-      openReport._id, senderId
+      '[ai-orchestrator] reportAction=%s — appending note to existing pending report %s for sender %s',
+      analysis.reportAction ?? '(unset)', openReport._id, senderId
     );
 
     // noteSummary = delta of new info; adminSummary may be null for supplement turns
@@ -245,7 +281,14 @@ export const processBatch = async ({ senderId, messages }) => {
     return openReport;
   }
 
-  // ── Step 5b: No existing report — create a new one ───────────────────────
+  // ── Step 5b: No existing report, or AI says this is a new incident ────────
+  if (openReport) {
+    console.info(
+      '[ai-orchestrator] reportAction=new_report — creating new report despite open report %s for sender %s',
+      openReport._id, senderId
+    );
+  }
+
   const reportCode = await nextReportCode();
 
   const report = await Report.create({
