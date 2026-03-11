@@ -19,7 +19,9 @@ export const AI_ANALYSIS_SCHEMA = {
     confidence: { type: 'number', minimum: 0, maximum: 1 },
     missingFields: { type: 'array', items: { type: 'string' } },
     followupMessage: { type: 'string' },
-    adminSummary: { type: 'string' }
+    adminSummary: { type: 'string' },
+    // noteSummary is optional — only populated when appending to an existing report
+    noteSummary: { type: 'string' }
   }
 };
 
@@ -64,6 +66,11 @@ export const validateAiAnalysis = (value) => {
     return false;
   }
 
+  // noteSummary is optional — validate only when present
+  if ('noteSummary' in value && typeof value.noteSummary !== 'string') {
+    return false;
+  }
+
   return true;
 };
 
@@ -74,5 +81,6 @@ export const createSafeAiFallback = () => ({
   missingFields: ['fullName', 'phone', 'incidentTime', 'incidentLocation'],
   followupMessage:
     'Vui lòng cung cấp họ tên, số điện thoại, thời gian và địa điểm xảy ra vụ việc để chúng tôi tiếp nhận đầy đủ.',
-  adminSummary: 'AI fallback: chưa đủ dữ liệu để phân tích chính xác, cần bổ sung thông tin từ người gửi.'
+  adminSummary: 'Chưa đủ dữ liệu để phân tích. Cần bổ sung thêm thông tin từ người gửi.',
+  noteSummary: 'Người dân gửi thêm thông tin nhưng chưa đủ để phân tích.'
 });

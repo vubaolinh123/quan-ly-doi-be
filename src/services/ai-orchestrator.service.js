@@ -143,7 +143,7 @@ const buildPrompt = ({ senderId, messages, history }) => {
     '',
     'JSON output format:',
     '{"intent":"report_crime|ask_info|complaint|other","suggestedCategoryCode":"<CATEGORY_CODE>",' +
-    '"confidence":0.0,"missingFields":["field1"],"followupMessage":"...","adminSummary":"..."}'
+    '"confidence":0.0,"missingFields":["field1"],"followupMessage":"...","adminSummary":"...","noteSummary":"..."}'
   ].join('\n');
 };
 
@@ -217,7 +217,8 @@ export const processBatch = async ({ senderId, messages }) => {
     await Report.findByIdAndUpdate(openReport._id, {
       $push: {
         notes: {
-          text: analysis.adminSummary || messages.map((m) => m.text).join(' '),
+          // Use noteSummary (delta of new info) when available; fall back to adminSummary
+          text: analysis.noteSummary || analysis.adminSummary || messages.map((m) => m.text).join(' '),
           source: 'ai',
           createdAt: new Date()
         }
