@@ -71,7 +71,7 @@ npm start
 | `GEMINI_API_KEY` | API key Google Gemini | Có |
 | `GEMINI_MODEL` | Model Gemini (mặc định: `gemini-1.5-flash`) | Không |
 | `TELEGRAM_BOT_TOKEN` | Token Telegram Bot | Có |
-| `TELEGRAM_CHAT_ID` | Chat ID nhận thông báo admin | Có |
+| `TELEGRAM_GROUP_CHAT_ID` | ID nhóm chat Telegram nhận thông báo (số âm, vd: -1001234567890) | Có |
 | `TELEGRAM_WEBHOOK_SECRET` | Secret kiểm tra callback Telegram | Có |
 | `MESSAGE_BATCH_WINDOW_MS` | Cửa sổ gom tin nhắn FB (ms, mặc định: `5000`) | Không |
 

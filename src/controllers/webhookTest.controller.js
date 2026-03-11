@@ -114,22 +114,22 @@ export const getTelegramConfig = asyncHandler(async (req, res) => {
     success: true,
     data: {
       botTokenSet: Boolean(env.telegramBotToken),
-      chatIdSet:   Boolean(env.telegramChatId),
-      chatId:      env.telegramChatId || null,
+      chatIdSet:   Boolean(env.telegramGroupChatId),
+      chatId:      env.telegramGroupChatId || null,
     },
   });
 });
 
 // ─── POST /api/webhooks/telegram/test ────────────────────────────────────────
-// Sends a test message to the configured TELEGRAM_CHAT_ID to verify the bot
-// can reach the admin.  Returns a human-readable hint on failure.
+// Sends a test message to the configured TELEGRAM_GROUP_CHAT_ID to verify the
+// bot can reach the group.  Returns a human-readable hint on failure.
 // ─────────────────────────────────────────────────────────────────────────────
 export const testTelegram = asyncHandler(async (req, res) => {
   if (!env.telegramBotToken) {
     return res.json({ ok: false, error: 'TELEGRAM_BOT_TOKEN chưa được cấu hình trong .env' });
   }
-  if (!env.telegramChatId) {
-    return res.json({ ok: false, error: 'TELEGRAM_CHAT_ID chưa được cấu hình trong .env' });
+  if (!env.telegramGroupChatId) {
+    return res.json({ ok: false, error: 'TELEGRAM_GROUP_CHAT_ID chưa được cấu hình trong .env' });
   }
 
   try {
@@ -139,8 +139,8 @@ export const testTelegram = asyncHandler(async (req, res) => {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          chat_id: env.telegramChatId,
-          text:    '✅ Kết nối Telegram thành công!\nHệ thống quản lý công an có thể gửi thông báo tới bạn.'
+          chat_id: env.telegramGroupChatId,
+          text:    '✅ Kết nối Telegram nhóm thành công!\nHệ thống quản lý công an có thể gửi thông báo vào nhóm này.'
         })
       }
     );
@@ -153,9 +153,9 @@ export const testTelegram = asyncHandler(async (req, res) => {
 
     // Map Telegram error codes to actionable Vietnamese hints
     const hints = {
-      400: 'Chat không tồn tại. Hãy nhắn tin /start cho bot của bạn trước, sau đó thử lại.',
+      400: 'Chat không tồn tại hoặc bot chưa được thêm vào nhóm. Thêm bot vào nhóm rồi thử lại.',
       401: 'TELEGRAM_BOT_TOKEN không hợp lệ. Kiểm tra lại token từ @BotFather.',
-      403: 'Bot bị chặn hoặc không có quyền gửi tin. Mở chat với bot và nhấn Start.',
+      403: 'Bot bị kick khỏi nhóm hoặc không có quyền gửi tin. Kiểm tra quyền của bot trong nhóm.',
     };
     const hint = hints[data.error_code] ?? '';
 

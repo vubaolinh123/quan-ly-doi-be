@@ -118,10 +118,10 @@ export const approveReport = asyncHandler(async (req, res) => {
 
   // Sync decision to Telegram so the approval message is updated
   try {
-    if (item.decisionMessageId && env.telegramChatId) {
+    if (item.decisionMessageId && env.telegramGroupChatId) {
       const noteText = note ? `\nGhi chú: ${note}` : '';
       await editMessageAfterDecision(item.decisionMessageId, {
-        chatId: env.telegramChatId,
+        chatId: env.telegramGroupChatId,
         text: `✅ ĐÃ DUYỆT (web)\nMã: ${item.reportCode}\nDuyệt bởi: ${adminName}${noteText}`
       });
     }
@@ -155,10 +155,10 @@ export const rejectReport = asyncHandler(async (req, res) => {
 
   // Sync decision to Telegram
   try {
-    if (item.decisionMessageId && env.telegramChatId) {
+    if (item.decisionMessageId && env.telegramGroupChatId) {
       const reasonText = reason ? `\nLý do: ${reason}` : '';
       await editMessageAfterDecision(item.decisionMessageId, {
-        chatId: env.telegramChatId,
+        chatId: env.telegramGroupChatId,
         text: `❌ ĐÃ TỪ CHỐI (web)\nMã: ${item.reportCode}\nTừ chối bởi: ${adminName}${reasonText}`
       });
     }

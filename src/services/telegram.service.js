@@ -113,14 +113,15 @@ const buildInlineKeyboard = (reportId) => {
 };
 
 export const sendApprovalMessage = async (report) => {
-  if (!env.telegramChatId) {
-    return { skipped: true, reason: 'missing_chat_id' };
+  if (!env.telegramGroupChatId) {
+    return { skipped: true, reason: 'missing_group_chat_id' };
   }
 
   const targetCategory = report.finalCategoryCode || report.categoryCode;
 
+  // Gửi vào nhóm chat chung — mọi thành viên trong nhóm đều thấy và thao tác được
   return telegramRequest('sendMessage', {
-    chat_id: env.telegramChatId,
+    chat_id: env.telegramGroupChatId,
     text: buildApprovalMessage(report),
     reply_markup: {
       inline_keyboard: buildInlineKeyboard(String(report._id), targetCategory)

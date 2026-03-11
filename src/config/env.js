@@ -22,9 +22,10 @@ const env = {
   // Gemini
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
-  // Telegram
+  // Telegram — bot gửi thông báo vào nhóm chat chung
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
-  telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
+  // ID nhóm chat (số âm, vd: -1001234567890). Fallback TELEGRAM_CHAT_ID để tương thích ngược.
+  telegramGroupChatId: process.env.TELEGRAM_GROUP_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '',
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || 'change_this_tg_secret',
   // Batching — default 10 s so users have time to type multi-sentence reports
   messageBatchWindowMs: toPositiveInt(process.env.MESSAGE_BATCH_WINDOW_MS, 10000)
