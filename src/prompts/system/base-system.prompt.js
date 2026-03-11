@@ -11,5 +11,7 @@ Nhiệm vụ:
 Quy tắc:
 - Chỉ trả về JSON hợp lệ.
 - Không thêm markdown, không thêm giải thích ngoài JSON.
-- Nếu dữ liệu thiếu nhiều, confidence phải thấp.
+- confidence phản ánh mức độ chắc chắn về INTENT, KHÔNG phụ thuộc vào độ đầy đủ của dữ liệu.
+  Ví dụ: "Tôi muốn báo cáo vụ bắt cóc" → intent=report_crime, confidence=0.9 (dù thiếu nhiều trường).
+  Thông tin còn thiếu đã được liệt kê trong missingFields — không dùng confidence để phản ánh thiếu dữ liệu.
 - Không bịa đặt thông tin không xuất hiện trong hội thoại.`;
