@@ -1,6 +1,15 @@
 import env from '../config/env.js';
 import { CATEGORY_CODES } from '../constants/domain.constants.js';
 
+const CHANNEL_LABEL = {
+  HOTLINE:   'Đường dây nóng',
+  FACEBOOK:  'Facebook',
+  ZALO:      'Zalo',
+  EMAIL:     'Email',
+  WEBSITE:   'Website',
+  TRUC_TIEP: 'Trực tiếp',
+};
+
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
 const telegramRequest = async (method, payload) => {
@@ -67,15 +76,53 @@ const getReporterLabel = (report) => {
 };
 
 const buildApprovalMessage = (report) => {
-  return [
-    '📌 Báo cáo mới chờ duyệt',
-    `Mã: ${report.reportCode}`,
-    `Nguồn: ${report.channel}`,
-    `Người gửi: ${getReporterLabel(report)}`,
-    `Nội dung: ${report.content}`,
-    `Phân tích AI: ${report.aiAnalysis?.summary || 'Không có'}`,
-    `Nhóm đề xuất: ${report.finalCategoryCode || report.categoryCode || 'KHXM'}`
-  ].join('\n');
+  const reporter  = report.reporterInfo || {};
+  const catCode   = report.finalCategoryCode || report.categoryCode || 'KHXM';
+  const catName   = CATEGORY_CODES[catCode] || catCode;
+  const channel   = CHANNEL_LABEL[report.channel] || report.channel || '—';
+
+  // Truncate raw content so the message stays within Telegram's 4 096-char limit
+  const rawContent = String(report.content || '');
+  const content    = rawContent.length > 350
+    ? rawContent.slice(0, 350) + '…'
+    : rawContent;
+
+  // ── Reporter block ────────────────────────────────────────────────────────
+  const reporterLines = [];
+  if (reporter.fullName)     reporterLines.push(`  • Họ tên  : ${reporter.fullName}`);
+  if (reporter.phone)        reporterLines.push(`  • SĐT    : ${reporter.phone}`);
+  if (reporter.age)          reporterLines.push(`  • Tuổi   : ${reporter.age}`);
+  if (reporter.facebookId)   reporterLines.push(`  • FB ID  : ${reporter.facebookId}`);
+  if (!reporterLines.length) reporterLines.push('  • Ẩn danh / chưa xác định');
+
+  // ── AI summary block ──────────────────────────────────────────────────────
+  const aiSummary = String(report.aiAnalysis?.summary || '').trim();
+
+  const parts = [
+    '🔔 BÁO CÁO MỚI — CHỜ DUYỆT',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+    '📋 THÔNG TIN CHUNG',
+    `  • Mã BC  : ${report.reportCode}`,
+    `  • Kênh   : ${channel}`,
+    '',
+    '👤 NGƯỜI TỐ GIÁC',
+    ...reporterLines,
+    '',
+    '📝 NỘI DUNG TỐ GIÁC',
+    content,
+    '',
+  ];
+
+  if (aiSummary) {
+    parts.push('🤖 PHÂN TÍCH AI');
+    parts.push(aiSummary);
+    parts.push('');
+  }
+
+  parts.push(`🏷️  PHÂN LOẠI: ${catCode} — ${catName}`);
+
+  return parts.join('\n');
 };
 
 const buildInlineKeyboard = (reportId) => {
