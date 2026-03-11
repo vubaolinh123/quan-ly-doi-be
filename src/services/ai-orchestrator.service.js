@@ -3,7 +3,7 @@ import ConversationMessage from '../models/ConversationMessage.js';
 import { messageBatchService } from './message-batch.service.js';
 import { analyzeWithGemini } from './gemini.service.js';
 import { sendFacebookTextMessage } from './facebook.service.js';
-import { sendApprovalMessage } from './telegram.service.js';
+import { sendApprovalMessage, sendNoteUpdateMessage } from './telegram.service.js';
 import { BASE_SYSTEM_PROMPT } from '../prompts/system/base-system.prompt.js';
 import { buildCategoryClassifierPrompt } from '../prompts/classification/category-classifier.prompt.js';
 import { INTAKE_FOLLOWUP_PROMPT } from '../prompts/conversation/intake-followup.prompt.js';
@@ -214,16 +214,25 @@ export const processBatch = async ({ senderId, messages }) => {
       openReport._id, senderId
     );
 
+    // noteSummary = delta of new info; adminSummary may be null for supplement turns
+    const noteText = analysis.noteSummary || analysis.adminSummary || messages.map((m) => m.text).join(' ');
+
     await Report.findByIdAndUpdate(openReport._id, {
       $push: {
         notes: {
-          // Use noteSummary (delta of new info) when available; fall back to adminSummary
-          text: analysis.noteSummary || analysis.adminSummary || messages.map((m) => m.text).join(' '),
+          text: noteText,
           source: 'ai',
           createdAt: new Date()
         }
       }
     });
+
+    // ── Telegram: notify group that this report has a new supplement ──────────
+    try {
+      await sendNoteUpdateMessage(openReport, noteText);
+    } catch (err) {
+      console.error('[ai-orchestrator] Telegram note-update notification failed:', err.message);
+    }
 
     try {
       if (analysis.followupMessage) {
@@ -246,7 +255,7 @@ export const processBatch = async ({ senderId, messages }) => {
     reporterInfo: { facebookId: senderId },
     categoryCode: analysis.suggestedCategoryCode,
     aiAnalysis: {
-      summary: analysis.adminSummary,
+      summary: analysis.adminSummary || analysis.noteSummary || '',
       confidence: analysis.confidence,
       extractedSignals: analysis.missingFields
     },

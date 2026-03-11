@@ -213,3 +213,38 @@ export const answerCallbackQuery = async (callbackQueryId, text = '') => {
     ...(text ? { text, show_alert: false } : {})
   });
 };
+
+/**
+ * Notify the group that an existing pending report has received a new
+ * supplement note from the reporter.  Sends a fresh message (does NOT edit
+ * the original approval message) and includes a deep-link to the admin
+ * reports page so an admin can open the report directly.
+ */
+export const sendNoteUpdateMessage = async (report, noteText) => {
+  if (!env.telegramGroupChatId) {
+    return { skipped: true, reason: 'missing_group_chat_id' };
+  }
+
+  const reportsUrl = env.frontendUrl ? `${env.frontendUrl}/admin/reports` : null;
+
+  const parts = [
+    '📬 BỔ SUNG BÁO CÁO — CẦN XEM LẠI',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+    `📋 Mã BC  : ${report.reportCode}`,
+    '',
+    '📝 NỘI DUNG BỔ SUNG TỪ NGƯỜI TỐ GIÁC',
+    noteText,
+    '',
+  ];
+
+  if (reportsUrl) {
+    parts.push(`🔗 Xem và duyệt tại: ${reportsUrl}`);
+  }
+
+  return telegramRequest('sendMessage', {
+    chat_id: env.telegramGroupChatId,
+    text: parts.join('\n'),
+    // No inline keyboard — this is informational only
+  });
+};

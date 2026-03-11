@@ -19,7 +19,7 @@ export const AI_ANALYSIS_SCHEMA = {
     confidence: { type: 'number', minimum: 0, maximum: 1 },
     missingFields: { type: 'array', items: { type: 'string' } },
     followupMessage: { type: 'string' },
-    adminSummary: { type: 'string' },
+    adminSummary: { type: ['string', 'null'] },
     // noteSummary is optional — only populated when appending to an existing report
     noteSummary: { type: 'string' }
   }
@@ -62,7 +62,12 @@ export const validateAiAnalysis = (value) => {
     return false;
   }
 
-  if (typeof value.followupMessage !== 'string' || typeof value.adminSummary !== 'string') {
+  if (typeof value.followupMessage !== 'string') {
+    return false;
+  }
+
+  // adminSummary may be null for supplement messages where the AI only fills noteSummary
+  if (value.adminSummary !== null && typeof value.adminSummary !== 'string') {
     return false;
   }
 

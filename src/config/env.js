@@ -27,6 +27,8 @@ const env = {
   // ID nhóm chat (số âm, vd: -1001234567890). Fallback TELEGRAM_CHAT_ID để tương thích ngược.
   telegramGroupChatId: process.env.TELEGRAM_GROUP_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '',
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || 'change_this_tg_secret',
+  // Frontend — used for building deep-links in Telegram notifications
+  frontendUrl: (process.env.FRONTEND_URL || '').replace(/\/$/, ''),
   // Batching — default 10 s so users have time to type multi-sentence reports
   messageBatchWindowMs: toPositiveInt(process.env.MESSAGE_BATCH_WINDOW_MS, 10000)
 };
