@@ -119,6 +119,7 @@ export const receiveTelegramWebhook = asyncHandler(async (req, res) => {
         '🗑️ Báo cáo vừa bị xóa trong lúc xử lý.\nCác nút bấm không còn hiệu lực.'
       );
     } else {
+      console.error('[telegram.controller] Action "%s" failed for report %s: %s', action, reportId, err.message, err);
       await updateMessage(
         msgId, chatId,
         '⚠️ Đã xảy ra lỗi khi xử lý. Vui lòng thử lại hoặc liên hệ quản trị viên.'

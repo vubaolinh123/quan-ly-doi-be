@@ -63,19 +63,34 @@ export const approveReport = async (reportId, categoryCode, telegramData = {}) =
   report.approvedAt = new Date();
   markTelegramDecision(report, telegramData);
 
-  const officer = await assignOfficerToTask(normalizedCategoryCode);
+  // Try to auto-assign an officer — non-fatal if none is configured for this category
+  let officer = null;
+  try {
+    officer = await assignOfficerToTask(normalizedCategoryCode);
+  } catch (err) {
+    if (err.code === 'NO_OFFICER_FOR_CATEGORY') {
+      console.warn(
+        '[report-approval] No officer for category %s — approving without task assignment',
+        normalizedCategoryCode
+      );
+    } else {
+      throw err; // unexpected error — let it propagate
+    }
+  }
 
   await report.save();
 
   let taskCreated = false;
-  try {
-    await Task.create(buildApprovalTaskPayload(report, officer._id, normalizedCategoryCode));
-    taskCreated = true;
-  } catch (error) {
-    if (error?.code === 11000) {
-      return { status: 'already_processed', report, taskCreated: false };
+  if (officer) {
+    try {
+      await Task.create(buildApprovalTaskPayload(report, officer._id, normalizedCategoryCode));
+      taskCreated = true;
+    } catch (error) {
+      if (error?.code === 11000) {
+        return { status: 'already_processed', report, taskCreated: false };
+      }
+      throw error;
     }
-    throw error;
   }
 
   return { status: 'approved', report, taskCreated };
