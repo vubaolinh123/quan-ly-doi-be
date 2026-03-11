@@ -35,6 +35,10 @@ const telegramRequest = async (method, payload) => {
       };
     }
 
+    if (method === 'answerCallbackQuery') {
+      return { ok: true, result: true };
+    }
+
     return { ok: true, result: {} };
   }
 
@@ -194,4 +198,18 @@ export const editMessageAfterDecision = async (messageId, decision) => {
   }
 
   return telegramRequest('editMessageText', payload);
+};
+
+/**
+ * Acknowledge a Telegram callback query to dismiss the loading indicator on
+ * the button.  Must be called within 10 s of receiving the callback.
+ * Optionally pass a short `text` to show a toast notification to the user.
+ */
+export const answerCallbackQuery = async (callbackQueryId, text = '') => {
+  if (!callbackQueryId) return { skipped: true, reason: 'missing_callback_query_id' };
+
+  return telegramRequest('answerCallbackQuery', {
+    callback_query_id: String(callbackQueryId),
+    ...(text ? { text, show_alert: false } : {})
+  });
 };
