@@ -1,6 +1,7 @@
 import env from '../config/env.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { messageBatchService } from '../services/message-batch.service.js';
+import { setupWebhook, getWebhookInfo } from '../services/telegram.service.js';
 
 // ─── GET /api/webhooks/facebook/config ───────────────────────────────────────
 // Returns the current Facebook webhook configuration status.
@@ -160,6 +161,62 @@ export const testTelegram = asyncHandler(async (req, res) => {
     const hint = hints[data.error_code] ?? '';
 
     return res.json({ ok: false, error: data.description, hint });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
+// ─── GET /api/webhooks/telegram/webhook-info ─────────────────────────────────
+// Returns Telegram's current webhook registration info (url, last error, etc.)
+// so the admin UI can show whether the webhook has been registered.
+// ─────────────────────────────────────────────────────────────────────────────
+export const getTelegramWebhookInfo = asyncHandler(async (req, res) => {
+  if (!env.telegramBotToken) {
+    return res.json({ ok: false, error: 'TELEGRAM_BOT_TOKEN chưa được cấu hình trong .env' });
+  }
+
+  try {
+    const data = await getWebhookInfo();
+    return res.json({ ok: true, data: data?.result ?? data });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/webhooks/telegram/setup-webhook ───────────────────────────────
+// Registers (or updates) the Telegram Bot webhook URL with the Bot API.
+// The frontend can call this once after deployment — or whenever the server
+// URL changes — to point Telegram at the correct backend endpoint.
+//
+// Body: { webhookUrl?: string }
+//   If webhookUrl is omitted, the backend infers it from the current request
+//   host (works for most reverse-proxy setups).
+// ─────────────────────────────────────────────────────────────────────────────
+export const setupTelegramWebhook = asyncHandler(async (req, res) => {
+  if (!env.telegramBotToken) {
+    return res.json({ ok: false, error: 'TELEGRAM_BOT_TOKEN chưa được cấu hình trong .env' });
+  }
+
+  // Determine the webhook URL — prefer explicit body value, fall back to inferred host
+  let webhookUrl = String(req.body?.webhookUrl || '').trim();
+  if (!webhookUrl) {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host     = req.headers['x-forwarded-host']  || req.headers.host || 'localhost:5000';
+    webhookUrl = `${protocol}://${host}/api/webhooks/telegram`;
+  }
+
+  try {
+    const data = await setupWebhook(webhookUrl);
+
+    if (data?.ok) {
+      return res.json({
+        ok: true,
+        webhookUrl,
+        message: `Webhook Telegram đã được đăng ký thành công tại: ${webhookUrl}`,
+      });
+    }
+
+    return res.json({ ok: false, error: data?.description ?? 'Telegram API trả về lỗi không xác định', webhookUrl });
   } catch (err) {
     return res.json({ ok: false, error: err.message });
   }

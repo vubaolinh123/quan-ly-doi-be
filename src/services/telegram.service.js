@@ -79,6 +79,16 @@ const getReporterLabel = (report) => {
   );
 };
 
+/**
+ * Build a Messenger conversation URL for a Facebook Page-Scoped ID.
+ * The URL opens the conversation in facebook.com/messages so page admins
+ * can read the full chat and reply directly.
+ */
+const getFacebookConversationUrl = (facebookId) => {
+  if (!facebookId) return null;
+  return `https://www.facebook.com/messages/t/${facebookId}`;
+};
+
 const buildApprovalMessage = (report) => {
   const reporter  = report.reporterInfo || {};
   const catCode   = report.finalCategoryCode || report.categoryCode || 'KHXM';
@@ -96,7 +106,10 @@ const buildApprovalMessage = (report) => {
   if (reporter.fullName)     reporterLines.push(`  • Họ tên  : ${reporter.fullName}`);
   if (reporter.phone)        reporterLines.push(`  • SĐT    : ${reporter.phone}`);
   if (reporter.age)          reporterLines.push(`  • Tuổi   : ${reporter.age}`);
-  if (reporter.facebookId)   reporterLines.push(`  • FB ID  : ${reporter.facebookId}`);
+  if (reporter.facebookId) {
+    const fbUrl = getFacebookConversationUrl(reporter.facebookId);
+    reporterLines.push(`  • Facebook: ${fbUrl || reporter.facebookId}`);
+  }
   if (!reporterLines.length) reporterLines.push('  • Ẩn danh / chưa xác định');
 
   // ── AI summary block ──────────────────────────────────────────────────────
@@ -130,36 +143,13 @@ const buildApprovalMessage = (report) => {
 };
 
 const buildInlineKeyboard = (reportId) => {
-  const categoryEntries = Object.keys(CATEGORY_CODES);
-  const categoryRows = [];
-
-  for (let i = 0; i < categoryEntries.length; i += 2) {
-    const leftCode = categoryEntries[i];
-    const rightCode = categoryEntries[i + 1];
-    const row = [
-      {
-        text: leftCode,
-        callback_data: buildCallback('change_category', reportId, leftCode)
-      }
-    ];
-
-    if (rightCode) {
-      row.push({
-        text: rightCode,
-        callback_data: buildCallback('change_category', reportId, rightCode)
-      });
-    }
-
-    categoryRows.push(row);
-  }
-
+  // Keep it minimal — AI already suggests a category; admins only need to approve/reject/toggle AI.
   return [
     [
-      { text: '✅ Approve', callback_data: buildCallback('approve', reportId) },
-      { text: '❌ Reject', callback_data: buildCallback('reject', reportId) },
-      { text: '🤖 Tắt AI', callback_data: buildCallback('toggle_ai', reportId) }
-    ],
-    ...categoryRows
+      { text: '✅ Duyệt',   callback_data: buildCallback('approve',    reportId) },
+      { text: '❌ Từ chối', callback_data: buildCallback('reject',     reportId) },
+      { text: '🤖 Tắt AI', callback_data: buildCallback('toggle_ai',  reportId) }
+    ]
   ];
 };
 
@@ -201,6 +191,35 @@ export const editMessageAfterDecision = async (messageId, decision) => {
 };
 
 /**
+ * Register (or update) the Telegram Bot webhook.
+ * Must be called once after deployment so Telegram knows where to deliver
+ * callback_query and message updates.
+ *
+ * @param {string} webhookUrl  Public HTTPS URL of the backend webhook endpoint.
+ *   Example: https://api.example.com/api/webhooks/telegram
+ */
+export const setupWebhook = async (webhookUrl) => {
+  if (!webhookUrl) throw new Error('webhookUrl is required');
+
+  const payload = { url: webhookUrl };
+
+  // Attach the secret token so the backend can verify requests are from Telegram.
+  if (env.telegramWebhookSecret) {
+    payload.secret_token = env.telegramWebhookSecret;
+  }
+
+  return telegramRequest('setWebhook', payload);
+};
+
+/**
+ * Fetch current webhook info from Telegram so the admin UI can display
+ * whether the webhook is properly registered.
+ */
+export const getWebhookInfo = async () => {
+  return telegramRequest('getWebhookInfo', {});
+};
+
+/**
  * Acknowledge a Telegram callback query to dismiss the loading indicator on
  * the button.  Must be called within 10 s of receiving the callback.
  * Optionally pass a short `text` to show a toast notification to the user.
@@ -216,16 +235,16 @@ export const answerCallbackQuery = async (callbackQueryId, text = '') => {
 
 /**
  * Notify the group that an existing pending report has received a new
- * supplement note from the reporter.  Sends a fresh message (does NOT edit
- * the original approval message) and includes a deep-link to the admin
- * reports page so an admin can open the report directly.
+ * supplement note from the reporter.  Replies to the original approval
+ * message (thread) using reply_to_message_id so admins can follow the
+ * conversation chain without searching.
  */
 export const sendNoteUpdateMessage = async (report, noteText) => {
   if (!env.telegramGroupChatId) {
     return { skipped: true, reason: 'missing_group_chat_id' };
   }
 
-  const reportsUrl = env.frontendUrl ? `${env.frontendUrl}/admin/reports` : null;
+  const fbUrl = getFacebookConversationUrl(report?.reporterInfo?.facebookId);
 
   const parts = [
     '📬 BỔ SUNG BÁO CÁO — CẦN XEM LẠI',
@@ -238,13 +257,20 @@ export const sendNoteUpdateMessage = async (report, noteText) => {
     '',
   ];
 
-  if (reportsUrl) {
-    parts.push(`🔗 Xem và duyệt tại: ${reportsUrl}`);
+  if (fbUrl) {
+    parts.push(`💬 Xem chat Facebook: ${fbUrl}`);
   }
 
-  return telegramRequest('sendMessage', {
+  const payload = {
     chat_id: env.telegramGroupChatId,
     text: parts.join('\n'),
-    // No inline keyboard — this is informational only
-  });
+  };
+
+  // Reply to the original approval message so this supplement appears
+  // in the same thread (admins don't need to search for the original).
+  if (report.decisionMessageId) {
+    payload.reply_to_message_id = Number(report.decisionMessageId);
+  }
+
+  return telegramRequest('sendMessage', payload);
 };
