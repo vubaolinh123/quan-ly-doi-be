@@ -8,6 +8,7 @@ import { BASE_SYSTEM_PROMPT } from '../prompts/system/base-system.prompt.js';
 import { buildCategoryClassifierPrompt } from '../prompts/classification/category-classifier.prompt.js';
 import { INTAKE_FOLLOWUP_PROMPT } from '../prompts/conversation/intake-followup.prompt.js';
 import { ADMIN_SUMMARY_PROMPT } from '../prompts/summary/admin-summary.prompt.js';
+import SystemConfig from '../models/SystemConfig.js';
 
 let aiCallCounter = 0;
 
@@ -22,6 +23,27 @@ const CONFIDENCE_THRESHOLD = 0.5;   // minimum AI confidence to persist a Report
  *     for most conversations without blowing the context window.
  */
 const HISTORY_LIMIT = 15;
+
+// ── Fast-path (filter OFF) ────────────────────────────────────────────────────
+/**
+ * Keywords that trigger immediate report creation when the AI filter is disabled.
+ * NOTE: Keep this list in sync with the informational display in
+ *       frontend/src/components/admin/modules/settings-module.tsx
+ */
+const FRAUD_KEYWORDS = [
+  'lừa đảo', 'bị lừa', 'chuyển khoản', 'mất tiền',
+  'lừa tiền', 'chiếm đoạt', 'lừa', 'scam'
+];
+
+/**
+ * Returns true if any message text contains at least one fraud keyword.
+ * Matching is case-insensitive (toLowerCase) — no diacritic normalisation needed
+ * because Vietnamese fraud keywords are reliably written with diacritics.
+ */
+const hasFraudKeyword = (messages) => {
+  const text = messages.map((m) => (m.text || '').toLowerCase()).join(' ');
+  return FRAUD_KEYWORDS.some((kw) => text.includes(kw));
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -185,6 +207,80 @@ const buildPrompt = ({ senderId, messages, history, openReport }) => {
 
 export const processBatch = async ({ senderId, messages }) => {
   if (!messages?.length) return null;
+
+  // ── Fast-path: report filter disabled ────────────────────────────────────
+  // When an admin has disabled the AI filter, any message containing a fraud
+  // keyword bypasses Gemini entirely and creates a Report immediately.
+  // We still respect the dedup rule: if the sender already has a pending
+  // report, we append a note rather than creating a duplicate.
+  const sysConfig = await SystemConfig.getSingleton();
+  if (!sysConfig.reportFilterEnabled && hasFraudKeyword(messages)) {
+    console.info(
+      '[ai-orchestrator] FAST-PATH — filter disabled, fraud keyword detected for sender=%s',
+      senderId
+    );
+
+    // Dedup: check for existing pending report
+    const existingReport = await findPendingReportForSender(senderId);
+    if (existingReport) {
+      const noteText = messages.map((m) => m.text).join(' ');
+      await Report.findByIdAndUpdate(existingReport._id, {
+        $push: { notes: { text: noteText, source: 'ai', createdAt: new Date() } }
+      });
+      try {
+        await sendFacebookTextMessage(
+          senderId,
+          'Chúng tôi đã nhận thêm thông tin và bổ sung vào tố giác đang xử lý của bạn.'
+        );
+      } catch (err) {
+        console.error('[ai-orchestrator] Facebook fast-path supplement reply failed:', err.message);
+      }
+      await saveToHistory(senderId, messages, null);
+      return existingReport;
+    }
+
+    // No existing pending report — create a new one immediately
+    const reportCode = await nextReportCode();
+    const content = messages.map((m) => m.text).join('\n');
+
+    const report = await Report.create({
+      reportCode,
+      channel: 'FACEBOOK',
+      content,
+      reporterInfo: { facebookId: senderId },
+      categoryCode: 'LD',
+      aiAnalysis: {
+        summary: 'Tạo nhanh — bộ lọc AI đã tắt, phát hiện từ khóa lừa đảo',
+        confidence: 1,
+        extractedSignals: []
+      },
+      status: 'pending_approval'
+    });
+
+    // Telegram approval notification
+    try {
+      const telegramResult = await sendApprovalMessage(report);
+      if (telegramResult?.result?.message_id) {
+        report.decisionMessageId = String(telegramResult.result.message_id);
+        await report.save();
+      }
+    } catch (err) {
+      console.error('[ai-orchestrator] Telegram fast-path notification failed:', err.message);
+    }
+
+    // Facebook auto-reply to the reporter
+    try {
+      await sendFacebookTextMessage(
+        senderId,
+        'Cảm ơn bạn đã phản ánh. Chúng tôi đã tiếp nhận tố giác và sẽ xử lý sớm nhất có thể.'
+      );
+    } catch (err) {
+      console.error('[ai-orchestrator] Facebook fast-path reply failed:', err.message);
+    }
+
+    await saveToHistory(senderId, messages, null);
+    return report;
+  }
 
   aiCallCounter += 1;
 

@@ -6,6 +6,7 @@ import taskRoutes from './task.routes.js';
 import reportRoutes from './report.routes.js';
 import scheduleRoutes from './schedule.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
+import settingsRoutes from './settings.routes.js';
 import webhookRoutes from './webhook.routes.js';
 import telegramRoutes from './telegram.routes.js';
 import { protect } from '../middlewares/auth.middleware.js';
@@ -21,5 +22,6 @@ router.use('/tasks', protect, taskRoutes);
 router.use('/reports', protect, reportRoutes);
 router.use('/schedules', protect, scheduleRoutes);
 router.use('/dashboard', protect, dashboardRoutes);
+router.use('/settings', protect, settingsRoutes);
 
 export default router;
