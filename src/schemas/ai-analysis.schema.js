@@ -31,7 +31,15 @@ export const AI_ANALYSIS_SCHEMA = {
     // noteSummary is optional — only populated when appending to an existing report
     noteSummary: { type: 'string' },
     // reportAction is optional — only meaningful when sender has a pending report
-    reportAction: { type: 'string', enum: AI_REPORT_ACTIONS }
+    reportAction: { type: 'string', enum: AI_REPORT_ACTIONS },
+    // reportTitle — short ~20 word summary for quick admin review
+    reportTitle: { type: ['string', 'null'] },
+    // extractedData — structured data extracted from conversation for Đơn Tố Giác
+    extractedData: { type: ['object', 'null'] },
+    // documentReady — true when 70-80% of form fields are filled
+    documentReady: { type: 'boolean' },
+    // currentStep — which step the AI is currently asking about
+    currentStep: { type: 'string' }
   }
 };
 
@@ -91,6 +99,26 @@ export const validateAiAnalysis = (value) => {
     return false;
   }
 
+  // reportTitle is optional — validate only when present
+  if ('reportTitle' in value && value.reportTitle !== null && typeof value.reportTitle !== 'string') {
+    return false;
+  }
+
+  // extractedData is optional — validate only when present (must be object or null)
+  if ('extractedData' in value && value.extractedData !== null && (typeof value.extractedData !== 'object' || Array.isArray(value.extractedData))) {
+    return false;
+  }
+
+  // documentReady is optional — validate only when present
+  if ('documentReady' in value && typeof value.documentReady !== 'boolean') {
+    return false;
+  }
+
+  // currentStep is optional — validate only when present
+  if ('currentStep' in value && typeof value.currentStep !== 'string') {
+    return false;
+  }
+
   return true;
 };
 
@@ -103,5 +131,9 @@ export const createSafeAiFallback = () => ({
     'Vui lòng cung cấp họ tên, số điện thoại, thời gian và địa điểm xảy ra vụ việc để chúng tôi tiếp nhận đầy đủ.',
   adminSummary: 'Chưa đủ dữ liệu để phân tích. Cần bổ sung thêm thông tin từ người gửi.',
   noteSummary: 'Người dân gửi thêm thông tin nhưng chưa đủ để phân tích.',
-  reportAction: 'supplement_existing_report'
+  reportAction: 'supplement_existing_report',
+  reportTitle: null,
+  extractedData: null,
+  documentReady: false,
+  currentStep: 'greeting'
 });

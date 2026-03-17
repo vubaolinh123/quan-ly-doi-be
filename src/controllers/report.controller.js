@@ -4,6 +4,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { successResponse } from '../utils/apiResponse.js';
 import { editMessageAfterDecision } from '../services/telegram.service.js';
 import env from '../config/env.js';
+import { generateToGiacDocument, readStoredDocument, storeGeneratedDocument } from '../services/document-generator.service.js';
 
 const allowedStatuses = ['pending_approval', 'approved', 'rejected'];
 
@@ -195,4 +196,60 @@ export const getLinkedTask = asyncHandler(async (req, res) => {
   }
 
   return successResponse({ res, message: 'Lấy công việc liên kết thành công', data: task });
+});
+
+export const generateDocument = asyncHandler(async (req, res) => {
+  const report = await Report.findById(req.params.id);
+
+  if (!report) {
+    return res.status(404).json({ success: false, message: 'Không tìm thấy tố giác' });
+  }
+
+  const generated = await storeGeneratedDocument(report.toObject());
+  report.documentUrl = generated.filename;
+  report.documentGenerated = true;
+  await report.save();
+
+  return successResponse({
+    res,
+    message: 'Tạo đơn tố giác thành công',
+    data: {
+      reportId: report._id,
+      documentUrl: report.documentUrl,
+      filename: generated.filename,
+    }
+  });
+});
+
+export const downloadDocument = asyncHandler(async (req, res) => {
+  const report = await Report.findById(req.params.id);
+
+  if (!report) {
+    return res.status(404).json({ success: false, message: 'Không tìm thấy tố giác' });
+  }
+
+  let filename = report.documentUrl;
+  let buffer;
+
+  if (filename) {
+    try {
+      const stored = await readStoredDocument(filename);
+      buffer = stored.buffer;
+    } catch {
+      filename = null;
+    }
+  }
+
+  if (!filename || !buffer) {
+    const generated = await generateToGiacDocument(report.toObject());
+    buffer = generated.buffer;
+    filename = generated.filename;
+    report.documentUrl = filename;
+    report.documentGenerated = true;
+    await report.save();
+  }
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  return res.status(200).send(buffer);
 });

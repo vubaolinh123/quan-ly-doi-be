@@ -24,7 +24,45 @@ const reportSchema = new mongoose.Schema(
       age: { type: Number },
       identityNumber: { type: String, trim: true },
       phone: { type: String, trim: true },
-      facebookId: { type: String, trim: true }
+      facebookId: { type: String, trim: true },
+      birthYear: { type: Number },
+      idIssuedBy: { type: String, trim: true },
+      idIssuedDate: { type: String, trim: true },
+      permanentAddress: { type: String, trim: true },
+      currentAddress: { type: String, trim: true }
+    },
+    suspectInfo: {
+      name: { type: String, trim: true },
+      currentAddress: { type: String, trim: true }
+    },
+    reportTitle: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    crimeType: {
+      type: String,
+      trim: true
+    },
+    crimeDescription: {
+      type: String,
+      trim: true
+    },
+    evidence: {
+      type: String,
+      trim: true
+    },
+    recipientAuthority: {
+      type: String,
+      trim: true
+    },
+    documentUrl: {
+      type: String,
+      default: null
+    },
+    documentGenerated: {
+      type: Boolean,
+      default: false
     },
     categoryCode: {
       type: String,

@@ -1,5 +1,11 @@
-export const ADMIN_SUMMARY_PROMPT = `Tạo 2 trường tóm tắt bằng tiếng Việt thuần túy dành cho cán bộ đọc.
+export const ADMIN_SUMMARY_PROMPT = `Tạo 3 trường tóm tắt bằng tiếng Việt thuần túy dành cho cán bộ đọc.
 TUYỆT ĐỐI không viết tên trường kỹ thuật: suggestedCategoryCode, confidence, missingFields, noteSummary, adminSummary hay bất kỳ từ tiếng Anh nào vào nội dung text.
+
+━━━ reportTitle ━━━
+Tóm tắt ngắn gọn ~20 từ nội dung vụ việc, dùng làm tiêu đề để cán bộ nhận xét nhanh.
+Ví dụ tốt: "Tố giác lừa đảo chuyển khoản 50 triệu qua app giả mạo ngân hàng tại Nha Trang"
+Ví dụ tốt: "Phản ánh đánh bạc online qua ứng dụng cá cược tại Cam Ranh"
+Nếu chưa đủ thông tin: "Tiếp nhận tố giác tội phạm - đang thu thập thông tin"
 
 ━━━ adminSummary ━━━
 Dùng khi tạo báo cáo mới lần đầu. Gồm tối đa 3 dòng:

@@ -2,13 +2,14 @@ import Report from '../models/Report.js';
 import ConversationMessage from '../models/ConversationMessage.js';
 import { messageBatchService } from './message-batch.service.js';
 import { analyzeWithGemini } from './gemini.service.js';
-import { sendFacebookTextMessage } from './facebook.service.js';
+import { sendFacebookFileMessage, sendFacebookTextMessage } from './facebook.service.js';
 import { sendApprovalMessage, sendNoteUpdateMessage } from './telegram.service.js';
 import { BASE_SYSTEM_PROMPT } from '../prompts/system/base-system.prompt.js';
 import { buildCategoryClassifierPrompt } from '../prompts/classification/category-classifier.prompt.js';
 import { INTAKE_FOLLOWUP_PROMPT } from '../prompts/conversation/intake-followup.prompt.js';
 import { ADMIN_SUMMARY_PROMPT } from '../prompts/summary/admin-summary.prompt.js';
 import SystemConfig from '../models/SystemConfig.js';
+import { storeGeneratedDocument } from './document-generator.service.js';
 
 let aiCallCounter = 0;
 
@@ -43,6 +44,112 @@ const FRAUD_KEYWORDS = [
 const hasFraudKeyword = (messages) => {
   const text = messages.map((m) => (m.text || '').toLowerCase()).join(' ');
   return FRAUD_KEYWORDS.some((kw) => text.includes(kw));
+};
+
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
+
+const normalizeString = (value) => (isNonEmptyString(value) ? value.trim() : undefined);
+
+const normalizeNumber = (value) => {
+  if (value === null || value === undefined || value === '') return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : undefined;
+};
+
+const getExtractedData = (analysis) => {
+  if (!analysis?.extractedData || typeof analysis.extractedData !== 'object' || Array.isArray(analysis.extractedData)) {
+    return {};
+  }
+
+  return analysis.extractedData;
+};
+
+const buildReporterInfo = (senderId, extractedData) => ({
+  facebookId: senderId,
+  fullName: normalizeString(extractedData.reporterName),
+  birthYear: normalizeNumber(extractedData.reporterBirthYear),
+  identityNumber: normalizeString(extractedData.reporterIdNumber),
+  idIssuedBy: normalizeString(extractedData.reporterIdIssuedBy),
+  idIssuedDate: normalizeString(extractedData.reporterIdIssuedDate),
+  permanentAddress: normalizeString(extractedData.reporterPermanentAddress),
+  currentAddress: normalizeString(extractedData.reporterCurrentAddress),
+});
+
+const buildReportFieldsFromAnalysis = ({ senderId, analysis }) => {
+  const extractedData = getExtractedData(analysis);
+
+  return {
+    reporterInfo: buildReporterInfo(senderId, extractedData),
+    suspectInfo: {
+      name: normalizeString(extractedData.suspectName),
+      currentAddress: normalizeString(extractedData.suspectCurrentAddress),
+    },
+    reportTitle: normalizeString(analysis.reportTitle),
+    crimeType: normalizeString(extractedData.crimeType),
+    crimeDescription: normalizeString(extractedData.crimeDescription),
+    evidence: normalizeString(extractedData.evidence),
+    recipientAuthority: normalizeString(extractedData.recipientAuthority),
+  };
+};
+
+const assignIfPresent = (target, key, value) => {
+  if (value === undefined) return;
+  target[key] = value;
+};
+
+const buildSupplementSet = (analysis) => {
+  const extractedData = getExtractedData(analysis);
+  const update = {};
+
+  assignIfPresent(update, 'reportTitle', normalizeString(analysis.reportTitle));
+  assignIfPresent(update, 'reporterInfo.fullName', normalizeString(extractedData.reporterName));
+  assignIfPresent(update, 'reporterInfo.birthYear', normalizeNumber(extractedData.reporterBirthYear));
+  assignIfPresent(update, 'reporterInfo.identityNumber', normalizeString(extractedData.reporterIdNumber));
+  assignIfPresent(update, 'reporterInfo.idIssuedBy', normalizeString(extractedData.reporterIdIssuedBy));
+  assignIfPresent(update, 'reporterInfo.idIssuedDate', normalizeString(extractedData.reporterIdIssuedDate));
+  assignIfPresent(update, 'reporterInfo.permanentAddress', normalizeString(extractedData.reporterPermanentAddress));
+  assignIfPresent(update, 'reporterInfo.currentAddress', normalizeString(extractedData.reporterCurrentAddress));
+  assignIfPresent(update, 'suspectInfo.name', normalizeString(extractedData.suspectName));
+  assignIfPresent(update, 'suspectInfo.currentAddress', normalizeString(extractedData.suspectCurrentAddress));
+  assignIfPresent(update, 'crimeType', normalizeString(extractedData.crimeType));
+  assignIfPresent(update, 'crimeDescription', normalizeString(extractedData.crimeDescription));
+  assignIfPresent(update, 'evidence', normalizeString(extractedData.evidence));
+  assignIfPresent(update, 'recipientAuthority', normalizeString(extractedData.recipientAuthority));
+
+  return update;
+};
+
+const maybeGenerateAndSendDocument = async ({ report, analysis, senderId }) => {
+  if (!report || analysis?.documentReady !== true || report.documentGenerated) {
+    return report;
+  }
+
+  try {
+    const generated = await storeGeneratedDocument(report.toObject ? report.toObject() : report);
+    const updatedReport = await Report.findByIdAndUpdate(
+      report._id,
+      {
+        documentUrl: generated.filename,
+        documentGenerated: true,
+      },
+      { new: true, runValidators: true }
+    );
+
+    try {
+      await sendFacebookTextMessage(
+        senderId,
+        'Cảm ơn bạn đã cung cấp thông tin. Chúng tôi đã tạo Đơn Tố Giác Tội Phạm dựa trên nội dung bạn gửi. Vui lòng kiểm tra file đính kèm.'
+      );
+      await sendFacebookFileMessage(senderId, generated.buffer, generated.filename);
+    } catch (err) {
+      console.error('[ai-orchestrator] Facebook document send failed:', err.message);
+    }
+
+    return updatedReport ?? report;
+  } catch (err) {
+    console.error('[ai-orchestrator] Document generation failed:', err.message);
+    return report;
+  }
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -199,7 +306,12 @@ const buildPrompt = ({ senderId, messages, history, openReport }) => {
     'JSON output format:',
     `{"intent":"report_crime|ask_info|complaint|other","suggestedCategoryCode":"<CATEGORY_CODE>",` +
     `"confidence":0.0,"missingFields":["field1"],"followupMessage":"...","adminSummary":"...",` +
-    `"noteSummary":"...",${reportActionNote}}`
+    `"noteSummary":"...","reportTitle":"...",${reportActionNote}` +
+    `"extractedData":{"reporterName":null,"reporterBirthYear":null,"reporterIdNumber":null,` +
+    `"reporterIdIssuedBy":null,"reporterIdIssuedDate":null,"reporterPermanentAddress":null,` +
+    `"reporterCurrentAddress":null,"suspectName":null,"suspectCurrentAddress":null,` +
+    `"crimeType":null,"crimeDescription":null,"evidence":null,"recipientAuthority":null},` +
+    `"documentReady":false,"currentStep":"step_1"}`
   ].join('\n');
 };
 
@@ -349,15 +461,25 @@ export const processBatch = async ({ senderId, messages }) => {
     // noteSummary = delta of new info; adminSummary may be null for supplement turns
     const noteText = analysis.noteSummary || analysis.adminSummary || messages.map((m) => m.text).join(' ');
 
-    await Report.findByIdAndUpdate(openReport._id, {
-      $push: {
-        notes: {
-          text: noteText,
-          source: 'ai',
-          createdAt: new Date()
-        }
+    const supplementSet = buildSupplementSet(analysis);
+
+    let updatedReport = await Report.findByIdAndUpdate(
+      openReport._id,
+      {
+        $push: {
+          notes: {
+            text: noteText,
+            source: 'ai',
+            createdAt: new Date()
+          }
+        },
+        ...(Object.keys(supplementSet).length > 0 ? { $set: supplementSet } : {})
+      },
+      {
+        new: true,
+        runValidators: true
       }
-    });
+    );
 
     // ── Telegram: notify group that this report has a new supplement ──────────
     try {
@@ -374,7 +496,13 @@ export const processBatch = async ({ senderId, messages }) => {
       console.error('[ai-orchestrator] Facebook followup (existing report) failed:', err.message);
     }
 
-    return openReport;
+    updatedReport = await maybeGenerateAndSendDocument({
+      report: updatedReport,
+      analysis,
+      senderId
+    });
+
+    return updatedReport;
   }
 
   // ── Step 5b: No existing report, or AI says this is a new incident ────────
@@ -387,11 +515,11 @@ export const processBatch = async ({ senderId, messages }) => {
 
   const reportCode = await nextReportCode();
 
-  const report = await Report.create({
+  let report = await Report.create({
     reportCode,
     channel: 'FACEBOOK',
     content: messages.map((m) => m.text).join('\n'),
-    reporterInfo: { facebookId: senderId },
+    ...buildReportFieldsFromAnalysis({ senderId, analysis }),
     categoryCode: analysis.suggestedCategoryCode,
     aiAnalysis: {
       summary: analysis.adminSummary || analysis.noteSummary || '',
@@ -420,6 +548,8 @@ export const processBatch = async ({ senderId, messages }) => {
   } catch (err) {
     console.error('[ai-orchestrator] Facebook followup (report) failed:', err.message);
   }
+
+  report = await maybeGenerateAndSendDocument({ report, analysis, senderId });
 
   return report;
 };

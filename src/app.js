@@ -16,7 +16,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ success: true, message: 'Backend CMS Công tác CSHS đang hoạt động' });
+  res.status(200).json({ success: true, message: 'Backend CMS Đội 3 - Phòng Công Nghệ Cao Khánh Hòa đang hoạt động' });
 });
 
 app.use('/api', routes);
