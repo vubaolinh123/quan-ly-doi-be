@@ -243,6 +243,8 @@ const finalizePendingConfirmation = async ({ senderId, pending }) => {
   const analysis = pending.analysisSnapshot || {};
   // Reconstruct extractedData into analysis so existing helpers work
   analysis.extractedData = pending.extractedData;
+  // Force documentReady — we only enter confirmation flow when it was true
+  analysis.documentReady = true;
 
   // ── Supplement an existing report ──────────────────────────────────────────
   if (pending.reportAction === 'supplement_existing_report' && pending.openReportId) {
@@ -265,6 +267,7 @@ const finalizePendingConfirmation = async ({ senderId, pending }) => {
       await sendFacebookTextMessage(senderId, 'Đã xác nhận. Thông tin bổ sung đã được cập nhật vào tố giác của bạn.');
     } catch (err) { console.error('[ai-orchestrator] Facebook ack after supplement-confirm failed:', err.message); }
 
+    console.info('[ai-orchestrator] Finalize: generating document for report %s (documentReady=%s, documentGenerated=%s)', updatedReport?._id, analysis.documentReady, updatedReport?.documentGenerated);
     updatedReport = await maybeGenerateAndSendDocument({ report: updatedReport, analysis, senderId });
 
     await PendingConfirmation.deleteOne({ _id: pending._id });
@@ -301,6 +304,7 @@ const finalizePendingConfirmation = async ({ senderId, pending }) => {
     await sendFacebookTextMessage(senderId, 'Đã xác nhận. Chúng tôi đã tiếp nhận tố giác và đang xử lý. Đơn Tố Giác sẽ được gửi cho bạn ngay.');
   } catch (err) { console.error('[ai-orchestrator] Facebook ack after confirm failed:', err.message); }
 
+  console.info('[ai-orchestrator] Finalize: generating document for report %s (documentReady=%s, documentGenerated=%s)', report._id, analysis.documentReady, report.documentGenerated);
   report = await maybeGenerateAndSendDocument({ report, analysis, senderId });
 
   await PendingConfirmation.deleteOne({ _id: pending._id });
