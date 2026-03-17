@@ -1,5 +1,6 @@
 import Report from '../models/Report.js';
 import ConversationMessage from '../models/ConversationMessage.js';
+import PendingConfirmation from '../models/PendingConfirmation.js';
 import { messageBatchService } from './message-batch.service.js';
 import { analyzeWithGemini } from './gemini.service.js';
 import { sendFacebookFileMessage, sendFacebookTextMessage } from './facebook.service.js';
@@ -49,6 +50,84 @@ const hasFraudKeyword = (messages) => {
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
 
 const normalizeString = (value) => (isNonEmptyString(value) ? value.trim() : undefined);
+
+// ── Confirmation flow ─────────────────────────────────────────────────────────
+
+/**
+ * Vietnamese labels shown in the confirmation bullet list.
+ * Keys match the extractedData field names produced by the AI schema.
+ */
+const EXTRACTED_DATA_LABELS = {
+  reporterName:             'Họ tên người tố giác',
+  reporterBirthYear:        'Năm sinh',
+  reporterIdNumber:         'Số CMND/CCCD',
+  reporterIdIssuedBy:       'Nơi cấp CMND/CCCD',
+  reporterIdIssuedDate:     'Ngày cấp CMND/CCCD',
+  reporterPermanentAddress: 'Địa chỉ thường trú',
+  reporterCurrentAddress:   'Địa chỉ hiện tại',
+  suspectName:              'Họ tên đối tượng',
+  suspectCurrentAddress:    'Địa chỉ đối tượng',
+  crimeType:                'Loại tội phạm',
+  crimeDescription:         'Mô tả hành vi vi phạm',
+  evidence:                 'Chứng cứ',
+  recipientAuthority:       'Cơ quan tiếp nhận đơn',
+};
+
+/**
+ * Regex that matches a reporter's explicit positive confirmation reply.
+ * Case-insensitive; matches the whole trimmed message.
+ */
+const CONFIRMATION_REGEX =
+  /^(đúng|ok|oke|okey|okay|đồng ý|dong y|xác nhận|xac nhan|không cần sửa|khong can sua|chính xác|chinh xac|đúng rồi|dung roi|correct|yes)$/i;
+
+const stripVietnameseDiacritics = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+
+const isPositiveConfirmation = (text) => {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+
+  if (CONFIRMATION_REGEX.test(raw)) return true;
+
+  const normalized = stripVietnameseDiacritics(raw).toLowerCase();
+  return [
+    'dung',
+    'ok',
+    'oke',
+    'okey',
+    'okay',
+    'dong y',
+    'xac nhan',
+    'khong can sua',
+    'chinh xac',
+    'dung roi',
+    'yes',
+    'correct',
+  ].includes(normalized);
+};
+
+/**
+ * Build a Vietnamese bullet-list confirmation message from extractedData.
+ * Only includes fields that have a non-null, non-empty value.
+ */
+const buildConfirmationMessage = (extractedData) => {
+  const lines = Object.entries(EXTRACTED_DATA_LABELS)
+    .filter(([key]) => isNonEmptyString(String(extractedData[key] ?? '')))
+    .map(([key, label]) => `- ${label}: ${extractedData[key]}`);
+
+  return [
+    'Cảm ơn bạn. Dưới đây là thông tin chúng tôi đã ghi nhận:',
+    '',
+    ...lines,
+    '',
+    'Vui lòng kiểm tra và trả lời "Đúng" nếu thông tin chính xác, hoặc gửi lại nội dung cần sửa đổi.',
+    'Sau khi xác nhận, chúng tôi sẽ tạo Đơn Tố Giác Tội Phạm và gửi cho bạn.',
+  ].join('\n');
+};
 
 const normalizeNumber = (value) => {
   if (value === null || value === undefined || value === '') return undefined;
@@ -149,6 +228,154 @@ const maybeGenerateAndSendDocument = async ({ report, analysis, senderId }) => {
   } catch (err) {
     console.error('[ai-orchestrator] Document generation failed:', err.message);
     return report;
+  }
+};
+
+// ── Confirmation handlers ─────────────────────────────────────────────────────
+
+/**
+ * Finalise a pending confirmation: create (or supplement) Report, send Telegram,
+ * maybe generate .docx, and clean up the PendingConfirmation record.
+ *
+ * @returns {import('mongoose').Document} the saved Report
+ */
+const finalizePendingConfirmation = async ({ senderId, pending }) => {
+  const analysis = pending.analysisSnapshot || {};
+  // Reconstruct extractedData into analysis so existing helpers work
+  analysis.extractedData = pending.extractedData;
+
+  // ── Supplement an existing report ──────────────────────────────────────────
+  if (pending.reportAction === 'supplement_existing_report' && pending.openReportId) {
+    const noteText = analysis.noteSummary || analysis.adminSummary || '(bổ sung sau xác nhận)';
+    const supplementSet = buildSupplementSet(analysis);
+
+    let updatedReport = await Report.findByIdAndUpdate(
+      pending.openReportId,
+      {
+        $push: { notes: { text: noteText, source: 'ai', createdAt: new Date() } },
+        ...(Object.keys(supplementSet).length > 0 ? { $set: supplementSet } : {})
+      },
+      { new: true, runValidators: true }
+    );
+
+    try { await sendNoteUpdateMessage(updatedReport, noteText); }
+    catch (err) { console.error('[ai-orchestrator] Telegram note-update after confirm failed:', err.message); }
+
+    try {
+      await sendFacebookTextMessage(senderId, 'Đã xác nhận. Thông tin bổ sung đã được cập nhật vào tố giác của bạn.');
+    } catch (err) { console.error('[ai-orchestrator] Facebook ack after supplement-confirm failed:', err.message); }
+
+    updatedReport = await maybeGenerateAndSendDocument({ report: updatedReport, analysis, senderId });
+
+    await PendingConfirmation.deleteOne({ _id: pending._id });
+    return updatedReport;
+  }
+
+  // ── Create a brand-new Report ──────────────────────────────────────────────
+  const reportCode = await nextReportCode();
+
+  let report = await Report.create({
+    reportCode,
+    channel: 'FACEBOOK',
+    content: pending.sourceContent || analysis.adminSummary || '(nội dung từ hội thoại)',
+    ...buildReportFieldsFromAnalysis({ senderId, analysis }),
+    categoryCode: analysis.suggestedCategoryCode,
+    aiAnalysis: {
+      summary: analysis.adminSummary || analysis.noteSummary || '',
+      confidence: analysis.confidence,
+      extractedSignals: analysis.missingFields
+    },
+    status: 'pending_approval'
+  });
+
+  // Telegram approval
+  try {
+    const telegramResult = await sendApprovalMessage(report);
+    if (telegramResult?.result?.message_id) {
+      report.decisionMessageId = String(telegramResult.result.message_id);
+      await report.save();
+    }
+  } catch (err) { console.error('[ai-orchestrator] Telegram after confirm failed:', err.message); }
+
+  try {
+    await sendFacebookTextMessage(senderId, 'Đã xác nhận. Chúng tôi đã tiếp nhận tố giác và đang xử lý. Đơn Tố Giác sẽ được gửi cho bạn ngay.');
+  } catch (err) { console.error('[ai-orchestrator] Facebook ack after confirm failed:', err.message); }
+
+  report = await maybeGenerateAndSendDocument({ report, analysis, senderId });
+
+  await PendingConfirmation.deleteOne({ _id: pending._id });
+  return report;
+};
+
+/**
+ * Handle an incoming batch for a sender who already has a PendingConfirmation.
+ *
+ * - If the batch is a confirmation → finalise.
+ * - If the batch is a correction → merge, re-send bullet list.
+ * - If too many attempts → abandon and let AI take over.
+ */
+const handlePendingConfirmation = async ({ senderId, messages, pending }) => {
+  const text = messages.map((m) => (m.text || '').trim()).join(' ').trim();
+
+  // ── Positive confirmation ──────────────────────────────────────────────────
+  if (isPositiveConfirmation(text)) {
+    console.info('[ai-orchestrator] Sender %s confirmed pending data — finalising', senderId);
+    await saveToHistory(senderId, messages, null);
+    const report = await finalizePendingConfirmation({ senderId, pending });
+    return report;
+  }
+
+  // ── Correction: merge new info, re-send bullet list ────────────────────────
+  console.info('[ai-orchestrator] Sender %s sent correction (attempt %d) — merging', senderId, pending.attempts + 1);
+
+  // Re-run AI to extract any updated fields from the correction text
+  try {
+    const history = await getConversationHistory(senderId);
+    const openReport = pending.openReportId ? await Report.findById(pending.openReportId).lean() : null;
+    const aiPrompt = buildPrompt({ senderId, messages, history, openReport });
+    const analysis = await analyzeWithGemini(aiPrompt);
+
+    // Save inbound only after AI prompt is built, avoiding duplicate context
+    await saveToHistory(senderId, messages, null);
+
+    // Merge: new non-null values override stored ones
+    const newExtracted = getExtractedData(analysis);
+    const merged = { ...pending.extractedData };
+    for (const [key, value] of Object.entries(newExtracted)) {
+      if (value !== null && value !== undefined && value !== '') {
+        merged[key] = value;
+      }
+    }
+
+    // Update snapshot fields that may have changed
+    const updatedSnapshot = { ...pending.analysisSnapshot };
+    if (analysis.adminSummary) updatedSnapshot.adminSummary = analysis.adminSummary;
+    if (analysis.reportTitle) updatedSnapshot.reportTitle = analysis.reportTitle;
+    if (analysis.suggestedCategoryCode) updatedSnapshot.suggestedCategoryCode = analysis.suggestedCategoryCode;
+
+    await PendingConfirmation.updateOne(
+      { _id: pending._id },
+      {
+        $set: { extractedData: merged, analysisSnapshot: updatedSnapshot },
+        $inc: { attempts: 1 }
+      }
+    );
+
+    // Re-send bullet list
+    const confirmMsg = buildConfirmationMessage(merged);
+    try {
+      await sendFacebookTextMessage(senderId, confirmMsg);
+    } catch (err) { console.error('[ai-orchestrator] Facebook re-confirm failed:', err.message); }
+    await saveToHistory(senderId, [], confirmMsg);
+
+    return null; // no Report yet
+  } catch (err) {
+    console.error('[ai-orchestrator] Correction re-analysis failed:', err.message);
+    // Send generic "please try again" instead of crashing
+    try {
+      await sendFacebookTextMessage(senderId, 'Xin lỗi, đã có lỗi khi xử lý chỉnh sửa. Vui lòng thử lại hoặc trả lời "Đúng" để xác nhận thông tin hiện tại.');
+    } catch (_) { /* silent */ }
+    return null;
   }
 };
 
@@ -394,6 +621,18 @@ export const processBatch = async ({ senderId, messages }) => {
     return report;
   }
 
+  // ── Confirmation flow: if sender already has pending confirmation, handle it first
+  // This must happen before the normal Gemini/report flow so we don't accidentally
+  // create a report or ask unrelated follow-up questions.
+  const pendingConfirmation = await PendingConfirmation.findOne({ senderId }).lean();
+  if (pendingConfirmation) {
+    return await handlePendingConfirmation({
+      senderId,
+      messages,
+      pending: pendingConfirmation
+    });
+  }
+
   aiCallCounter += 1;
 
   // ── Step 1: Load conversation history for this sender ────────────────────
@@ -458,6 +697,39 @@ export const processBatch = async ({ senderId, messages }) => {
       analysis.reportAction ?? '(unset)', openReport._id, senderId
     );
 
+    // If AI says data is ready, do NOT supplement immediately.
+    // Save pending confirmation and ask reporter to confirm first.
+    if (sysConfig.reportFilterEnabled && analysis.documentReady === true) {
+      const extractedData = getExtractedData(analysis);
+      const confirmMessage = buildConfirmationMessage(extractedData);
+
+      await PendingConfirmation.findOneAndUpdate(
+        { senderId },
+        {
+          $set: {
+            senderId,
+            extractedData,
+            analysisSnapshot: analysis,
+            sourceContent: messages.map((m) => m.text).join('\n'),
+            reportAction: 'supplement_existing_report',
+            openReportId: openReport._id,
+            createdAt: new Date()
+          },
+          $inc: { attempts: 1 }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+
+      try {
+        await sendFacebookTextMessage(senderId, confirmMessage);
+      } catch (err) {
+        console.error('[ai-orchestrator] Facebook confirmation (supplement) failed:', err.message);
+      }
+
+      await saveToHistory(senderId, [], confirmMessage);
+      return null;
+    }
+
     // noteSummary = delta of new info; adminSummary may be null for supplement turns
     const noteText = analysis.noteSummary || analysis.adminSummary || messages.map((m) => m.text).join(' ');
 
@@ -511,6 +783,39 @@ export const processBatch = async ({ senderId, messages }) => {
       '[ai-orchestrator] reportAction=new_report — creating new report despite open report %s for sender %s',
       openReport._id, senderId
     );
+  }
+
+  // If AI says the information is sufficient, do NOT create Report yet.
+  // Save pending confirmation and wait for explicit reporter confirmation.
+  if (sysConfig.reportFilterEnabled && analysis.documentReady === true) {
+    const extractedData = getExtractedData(analysis);
+    const confirmMessage = buildConfirmationMessage(extractedData);
+
+    await PendingConfirmation.findOneAndUpdate(
+      { senderId },
+      {
+        $set: {
+          senderId,
+          extractedData,
+          analysisSnapshot: analysis,
+          sourceContent: messages.map((m) => m.text).join('\n'),
+          reportAction: 'new_report',
+          openReportId: null,
+          createdAt: new Date()
+        },
+        $inc: { attempts: 1 }
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    try {
+      await sendFacebookTextMessage(senderId, confirmMessage);
+    } catch (err) {
+      console.error('[ai-orchestrator] Facebook confirmation (new report) failed:', err.message);
+    }
+
+    await saveToHistory(senderId, [], confirmMessage);
+    return null;
   }
 
   const reportCode = await nextReportCode();

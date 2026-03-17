@@ -3,19 +3,21 @@ import crypto from 'crypto';
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.PORT = process.env.PORT || '5001';
 process.env.E2E_MOCK = 'true';
+process.env.FACEBOOK_PAGE_ACCESS_TOKEN = '';
 process.env.FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET || 'test-fb-secret';
 process.env.FACEBOOK_VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN || 'test-verify-token';
 process.env.TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'test-tg-secret';
 process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test-key';
 process.env.MESSAGE_BATCH_WINDOW_MS = process.env.MESSAGE_BATCH_WINDOW_MS || '5000';
 
-const [{ default: mongoose }, { default: app }, { default: env }, { default: Report }, { default: Task }, { default: Officer }, { resetAiCallCounter, getAiCallCounter }, { messageBatchService }, facebookMessagesFixtureModule, telegramCallbacksFixtureModule] = await Promise.all([
+const [{ default: mongoose }, { default: app }, { default: env }, { default: Report }, { default: Task }, { default: Officer }, { default: PendingConfirmation }, { resetAiCallCounter, getAiCallCounter }, { messageBatchService }, facebookMessagesFixtureModule, telegramCallbacksFixtureModule] = await Promise.all([
   import('mongoose'),
   import('../src/app.js'),
   import('../src/config/env.js'),
   import('../src/models/Report.js'),
   import('../src/models/Task.js'),
   import('../src/models/Officer.js'),
+  import('../src/models/PendingConfirmation.js'),
   import('../src/services/ai-orchestrator.service.js'),
   import('../src/services/message-batch.service.js'),
   import('./test-fixtures/facebook-messages.json', { with: { type: 'json' } }),
@@ -26,7 +28,7 @@ const facebookMessagesFixture = facebookMessagesFixtureModule.default;
 const telegramCallbacksFixture = telegramCallbacksFixtureModule.default;
 
 const senderId = String(facebookMessagesFixture?.[0]?.senderId || 'e2e-fb-user-001');
-const testCategoryCode = 'MA_TUY';
+const testCategoryCode = 'TDD';
 const verifyOfficerName = 'E2E Verify Officer';
 const e2eContentMarker = 'E2E-HARNESS:';
 
@@ -124,6 +126,7 @@ const cleanup = async () => {
   messageBatchService.clearAll();
   await Task.deleteMany({ description: { $regex: e2eContentMarker } });
   await Report.deleteMany({ 'reporterInfo.facebookId': senderId, content: { $regex: e2eContentMarker } });
+  await PendingConfirmation.deleteMany({ senderId });
   await Officer.deleteMany({ hoTen: verifyOfficerName });
 };
 
@@ -159,9 +162,37 @@ const main = async () => {
       fail(`expected aiCalls=1, got ${aiCalls}`);
     }
 
-    const createdReport = await Report.findOne({ 'reporterInfo.facebookId': senderId, content: { $regex: e2eContentMarker } }).sort({ createdAt: -1 });
+    const pending = await PendingConfirmation.findOne({ senderId });
+    if (!pending) {
+      throw new Error('Expected PendingConfirmation to be created after first batch');
+    }
+    console.log('PASS: pending confirmation created before report persistence');
+
+    const createdReportEarly = await Report.findOne({ 'reporterInfo.facebookId': senderId, content: { $regex: e2eContentMarker } }).sort({ createdAt: -1 });
+    if (createdReportEarly) {
+      fail('report must NOT be created before user confirmation');
+    } else {
+      console.log('PASS: no report created before explicit confirmation');
+    }
+
+    const confirmPayload = buildFacebookWebhookPayload({
+      senderId,
+      text: 'Đúng',
+      messageId: `e2e-mid-confirm-${Date.now()}`
+    }, 999);
+    await postFacebookWebhook(baseUrl, confirmPayload);
+    await new Promise((resolve) => setTimeout(resolve, Number(env.messageBatchWindowMs) + 1200));
+
+    const createdReport = await Report.findOne({ 'reporterInfo.facebookId': senderId }).sort({ createdAt: -1 });
     if (!createdReport) {
-      throw new Error('Expected report to be created after Facebook batch');
+      throw new Error('Expected report to be created after confirmation');
+    }
+
+    const pendingAfterConfirm = await PendingConfirmation.findOne({ senderId });
+    if (pendingAfterConfirm) {
+      fail('pending confirmation should be removed after confirmation');
+    } else {
+      console.log('PASS: pending confirmation removed after confirmation');
     }
 
     if (createdReport.status === 'pending_approval') {

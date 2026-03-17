@@ -38,8 +38,28 @@ export const analyzeWithGemini = async (promptText) => {
       suggestedCategoryCode: 'TDD',
       confidence: 0.9,
       missingFields: [],
-      followupMessage: 'Cảm ơn bạn đã cung cấp thông tin, chúng tôi đã tiếp nhận để xử lý.',
-      adminSummary: 'E2E mock summary: nghi vấn liên quan ma túy, cần xác minh thực địa.'
+      followupMessage: '',
+      adminSummary: 'E2E mock summary: nghi vấn liên quan ma túy, cần xác minh thực địa.',
+      noteSummary: 'E2E mock note summary',
+      reportAction: 'new_report',
+      reportTitle: 'E2E Mock Report Title',
+      extractedData: {
+        reporterName: 'Nguyễn Văn A',
+        reporterBirthYear: 1990,
+        reporterIdNumber: '012345678901',
+        reporterIdIssuedBy: 'Cục CSQLHC về TTXH',
+        reporterIdIssuedDate: '2021-01-01',
+        reporterPermanentAddress: 'Phường X, TP Nha Trang',
+        reporterCurrentAddress: 'Phường Y, TP Nha Trang',
+        suspectName: 'Trần Văn B',
+        suspectCurrentAddress: 'Phường Z, TP Nha Trang',
+        crimeType: 'Nghi vấn ma túy',
+        crimeDescription: 'Tập trung đông người và có dấu hiệu mua bán trái phép chất ma túy',
+        evidence: 'Ảnh chụp, video clip',
+        recipientAuthority: 'Công an TP Nha Trang'
+      },
+      documentReady: true,
+      currentStep: 'step_7'
     };
   }
 

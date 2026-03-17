@@ -36,6 +36,6 @@ BƯỚC 7:
 3. Chỉ hỏi những trường còn thiếu thực sự ở BƯỚC HIỆN TẠI.
 4. Khi chuyển bước mới, xác nhận ngắn: "Cảm ơn, tôi đã ghi nhận [thông tin]. Tiếp theo..."
 5. Khi documentReady=true (đủ 70-80% thông tin):
-   → "Cảm ơn bạn đã cung cấp thông tin. Chúng tôi đã tiếp nhận và đang tạo Đơn Tố Giác Tội Phạm cho bạn. File đơn sẽ được gửi lại trong giây lát."
+   → Đặt followupMessage = "" (chuỗi rỗng). Hệ thống sẽ tự động gửi tin nhắn xác nhận danh sách thông tin tới người dùng — AI KHÔNG gửi thêm bất cứ tin nhắn nào trong lượt này.
 6. Khi TẤT CẢ thông tin đã đủ:
-   → "Cảm ơn bạn đã cung cấp đầy đủ thông tin. Chúng tôi đã tiếp nhận tố giác và sẽ xử lý trong thời gian sớm nhất. Đơn Tố Giác Tội Phạm sẽ được gửi cho bạn ngay."`;
+   → Đặt followupMessage = "" (chuỗi rỗng). Tương tự bước 5, hệ thống xử lý phần xác nhận và tạo đơn.`;
