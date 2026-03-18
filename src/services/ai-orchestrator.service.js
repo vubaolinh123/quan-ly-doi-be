@@ -10,7 +10,7 @@ import { SYSTEM_INSTRUCTION } from '../prompts/system/base-system.prompt.js';
 import { INTAKE_FOLLOWUP_PROMPT } from '../prompts/conversation/intake-followup.prompt.js';
 import { ADMIN_SUMMARY_PROMPT } from '../prompts/summary/admin-summary.prompt.js';
 import SystemConfig from '../models/SystemConfig.js';
-import { storeGeneratedDocument } from './document-generator.service.js';
+import { storeGeneratedDocument, readStoredDocument } from './document-generator.service.js';
 
 let aiCallCounter = 0;
 
@@ -317,6 +317,11 @@ const finalizePendingConfirmation = async ({ senderId, pending }) => {
       await sendFacebookTextMessage(senderId, 'Đã xác nhận. Thông tin bổ sung đã được cập nhật vào tố giác của bạn.');
     } catch (err) { console.error('[ai-orchestrator] Facebook ack after supplement-confirm failed:', err.message); }
 
+    // Force regenerate document with latest confirmed data (reset flag so maybeGenerate... doesn't bail)
+    if (updatedReport && updatedReport.documentGenerated) {
+      updatedReport.documentGenerated = false;
+      await updatedReport.save();
+    }
     console.info('[ai-orchestrator] Finalize: generating document for report %s (documentReady=%s, documentGenerated=%s)', updatedReport?._id, analysis.documentReady, updatedReport?.documentGenerated);
     updatedReport = await maybeGenerateAndSendDocument({ report: updatedReport, analysis, senderId });
 
@@ -355,6 +360,11 @@ const finalizePendingConfirmation = async ({ senderId, pending }) => {
     await sendFacebookTextMessage(senderId, 'Đã xác nhận. Chúng tôi đã tiếp nhận tố giác và đang xử lý. Đơn Tố Giác sẽ được gửi cho bạn ngay.');
   } catch (err) { console.error('[ai-orchestrator] Facebook ack after confirm failed:', err.message); }
 
+  // Force regenerate document with confirmed data (reset flag so maybeGenerate... doesn't bail)
+  if (report && report.documentGenerated) {
+    report.documentGenerated = false;
+    await report.save();
+  }
   console.info('[ai-orchestrator] Finalize: generating document for report %s (documentReady=%s, documentGenerated=%s)', report._id, analysis.documentReady, report.documentGenerated);
   report = await maybeGenerateAndSendDocument({ report, analysis, senderId });
 
@@ -819,6 +829,31 @@ export const processBatch = async ({ senderId, messages }) => {
       '[ai-orchestrator] NON-report (intent=%s, confidence=%s) — skipping Report persistence',
       analysis.intent, analysis.confidence ?? 'N/A'
     );
+
+    // ── Document re-send: user asking for existing document ──────────────────
+    // When intent is not report_crime but user has an open report with a
+    // generated document and their message looks like a document request,
+    // re-send the file instead of falling through to generic followup.
+    if (openReport && openReport.documentGenerated && openReport.documentUrl) {
+      const batchText = messages.map((m) => (m.text || '').toLowerCase()).join(' ');
+      const DOCUMENT_REQUEST_KEYWORDS = ['đơn tố giác', 'gửi đơn', 'gửi file', 'tải đơn', 'file word', 'tài liệu', 'document'];
+      const wantsDocument = DOCUMENT_REQUEST_KEYWORDS.some((kw) => batchText.includes(kw));
+
+      if (wantsDocument) {
+        console.info('[ai-orchestrator] Document re-send requested by sender %s for report %s', senderId, openReport._id);
+        try {
+          const stored = await readStoredDocument(openReport.documentUrl);
+          await sendFacebookTextMessage(senderId, 'Đây là Đơn Tố Giác Tội Phạm của bạn. Vui lòng kiểm tra file đính kèm.');
+          await sendFacebookFileMessage(senderId, stored.buffer, openReport.documentUrl);
+        } catch (err) {
+          console.error('[ai-orchestrator] Document re-send failed:', err.message);
+          try {
+            await sendFacebookTextMessage(senderId, 'Xin lỗi, không thể gửi lại đơn tố giác lúc này. Vui lòng thử lại sau.');
+          } catch (_) { /* silent */ }
+        }
+        return null;
+      }
+    }
 
     try {
       const extracted = getExtractedData(analysis);
