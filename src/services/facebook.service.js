@@ -1,6 +1,6 @@
 import env from '../config/env.js';
 
-const GRAPH_API_BASE = 'https://graph.facebook.com/v20.0';
+const GRAPH_API_BASE = `https://graph.facebook.com/${env.facebookGraphApiVersion}`;
 
 export const sendFacebookTextMessage = async (recipientId, text) => {
   if (!env.facebookPageAccessToken) {
@@ -82,11 +82,71 @@ export const sendFacebookFileMessage = async (recipientId, fileBuffer, filename 
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('[facebook.service] File send failed: %s %s', response.status, errorText);
-    throw new Error(`Facebook send file failed: ${response.status} ${errorText}`);
+    console.error(
+      '[facebook.service] Direct file send failed: %s %s — trying attachment upload fallback',
+      response.status, errorText
+    );
+    return uploadAttachmentAndSend(recipientId, fileBuffer, filename);
   }
 
   const result = await response.json();
   console.info('[facebook.service] File sent successfully to %s: messageId=%s', recipientId, result?.message_id);
+  return result;
+};
+
+/**
+ * Fallback: upload file via Attachment Upload API, then send message
+ * referencing the attachment_id. Used when direct multipart send fails.
+ *
+ * Step A: POST /me/message_attachments → { attachment_id }
+ * Step B: POST /me/messages with attachment_id
+ */
+const uploadAttachmentAndSend = async (recipientId, fileBuffer, filename) => {
+  const blob = new Blob(
+    [fileBuffer],
+    { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+  );
+
+  // Step A: Upload to message_attachments
+  const uploadForm = new FormData();
+  uploadForm.append(
+    'message',
+    JSON.stringify({ attachment: { type: 'file', payload: { is_reusable: true } } })
+  );
+  uploadForm.append('filedata', blob, filename);
+
+  const uploadUrl = `${GRAPH_API_BASE}/me/message_attachments?access_token=${env.facebookPageAccessToken}`;
+  console.info('[facebook.service] Uploading attachment: %s (%d bytes)', filename, fileBuffer.length);
+
+  const uploadResp = await fetch(uploadUrl, { method: 'POST', body: uploadForm });
+  if (!uploadResp.ok) {
+    const errText = await uploadResp.text();
+    throw new Error(`Attachment upload failed: ${uploadResp.status} ${errText}`);
+  }
+  const { attachment_id } = await uploadResp.json();
+  console.info('[facebook.service] Attachment uploaded: attachment_id=%s', attachment_id);
+
+  // Step B: Send message referencing attachment_id
+  const sendResp = await fetch(
+    `${GRAPH_API_BASE}/me/messages?access_token=${env.facebookPageAccessToken}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: { id: String(recipientId) },
+        messaging_type: 'RESPONSE',
+        message: { attachment: { type: 'file', payload: { attachment_id } } },
+      }),
+    }
+  );
+  if (!sendResp.ok) {
+    const errText = await sendResp.text();
+    throw new Error(`Send with attachment_id failed: ${sendResp.status} ${errText}`);
+  }
+  const result = await sendResp.json();
+  console.info(
+    '[facebook.service] File sent via attachment_id to %s: messageId=%s',
+    recipientId, result?.message_id
+  );
   return result;
 };

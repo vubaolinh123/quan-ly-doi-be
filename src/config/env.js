@@ -19,6 +19,7 @@ const env = {
   facebookVerifyToken:      process.env.FACEBOOK_VERIFY_TOKEN      || '',
   facebookPageAccessToken:  process.env.FACEBOOK_PAGE_ACCESS_TOKEN || '',
   facebookAppSecret:        process.env.FACEBOOK_APP_SECRET        || '',
+  facebookGraphApiVersion:  process.env.FACEBOOK_GRAPH_API_VERSION || 'v21.0',
   // Gemini
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',

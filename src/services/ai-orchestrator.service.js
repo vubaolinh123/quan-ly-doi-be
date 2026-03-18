@@ -129,6 +129,24 @@ const buildConfirmationMessage = (extractedData) => {
   ].join('\n');
 };
 
+/**
+ * Build a Vietnamese bullet-list of MISSING fields from extractedData.
+ * Returns null when:
+ *  – extractedData is falsy (AI hasn't returned structured data yet)
+ *  – ALL fields are empty  (AI hasn't started extracting — use AI followup)
+ *  – ZERO fields are empty (all data collected — documentReady flow handles this)
+ */
+const buildMissingFieldsMessage = (extractedData) => {
+  if (!extractedData) return null;
+  const allKeys = Object.keys(EXTRACTED_DATA_LABELS);
+  const missing = Object.entries(EXTRACTED_DATA_LABELS)
+    .filter(([key]) => !isNonEmptyString(String(extractedData[key] ?? '')))
+    .map(([, label]) => `- ${label}`);
+  // ALL empty → AI hasn't started extracting; NONE empty → all collected
+  if (missing.length === allKeys.length || missing.length === 0) return null;
+  return ['Vui lòng cung cấp các thông tin sau:', '', ...missing].join('\n');
+};
+
 const normalizeNumber = (value) => {
   if (value === null || value === undefined || value === '') return undefined;
   const num = Number(value);
@@ -681,8 +699,11 @@ export const processBatch = async ({ senderId, messages }) => {
     );
 
     try {
-      if (analysis.followupMessage) {
-        await sendFacebookTextMessage(senderId, analysis.followupMessage);
+      const extracted = getExtractedData(analysis);
+      const missingMsg = buildMissingFieldsMessage(extracted);
+      const followup = missingMsg || analysis.followupMessage;
+      if (followup) {
+        await sendFacebookTextMessage(senderId, followup);
       }
     } catch (err) {
       console.error('[ai-orchestrator] Facebook followup (non-report) failed:', err.message);
@@ -757,16 +778,22 @@ export const processBatch = async ({ senderId, messages }) => {
       }
     );
 
-    // ── Telegram: notify group that this report has a new supplement ──────────
-    try {
-      await sendNoteUpdateMessage(openReport, noteText);
-    } catch (err) {
-      console.error('[ai-orchestrator] Telegram note-update notification failed:', err.message);
+    // ── Telegram: only notify immediately when filter is OFF (fast-path) ──────
+    // When filter is ON, Telegram notification deferred to finalizePendingConfirmation
+    if (!sysConfig.reportFilterEnabled) {
+      try {
+        await sendNoteUpdateMessage(openReport, noteText);
+      } catch (err) {
+        console.error('[ai-orchestrator] Telegram note-update notification failed:', err.message);
+      }
     }
 
     try {
-      if (analysis.followupMessage) {
-        await sendFacebookTextMessage(senderId, analysis.followupMessage);
+      const extracted = getExtractedData(analysis);
+      const missingMsg = buildMissingFieldsMessage(extracted);
+      const followup = missingMsg || analysis.followupMessage;
+      if (followup) {
+        await sendFacebookTextMessage(senderId, followup);
       }
     } catch (err) {
       console.error('[ai-orchestrator] Facebook followup (existing report) failed:', err.message);
@@ -851,8 +878,11 @@ export const processBatch = async ({ senderId, messages }) => {
 
   // ── Step 7: Facebook follow-up to the reporter ────────────────────────────
   try {
-    if (analysis.followupMessage) {
-      await sendFacebookTextMessage(senderId, analysis.followupMessage);
+    const extracted = getExtractedData(analysis);
+    const missingMsg = buildMissingFieldsMessage(extracted);
+    const followup = missingMsg || analysis.followupMessage;
+    if (followup) {
+      await sendFacebookTextMessage(senderId, followup);
     }
   } catch (err) {
     console.error('[ai-orchestrator] Facebook followup (report) failed:', err.message);
