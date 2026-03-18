@@ -39,13 +39,18 @@ const FRAUD_KEYWORDS = [
 
 // ── Field classification for server-side documentReady ────────────────────
 const REQUIRED_FIELDS = ['reporterName', 'crimeType', 'crimeDescription'];
-const NICE_TO_HAVE_FIELDS = [
+const REPORTER_IDENTITY_FIELDS = [
   'reporterBirthYear', 'reporterIdNumber', 'reporterIdIssuedBy',
   'reporterIdIssuedDate', 'reporterPermanentAddress', 'reporterCurrentAddress',
-  'suspectName', 'suspectCurrentAddress'
 ];
+// Suspect fields are CONTEXTUAL — only relevant when there's a known individual suspect.
+// NOT asked when reporting websites, organisations, or unknown perpetrators.
+const CONTEXTUAL_FIELDS = ['suspectName', 'suspectCurrentAddress'];
 const OPTIONAL_FIELDS = ['evidence', 'recipientAuthority'];
-const NON_OPTIONAL_FIELDS = [...REQUIRED_FIELDS, ...NICE_TO_HAVE_FIELDS];
+// Fields that the server-side missing-fields message will list (excludes contextual + optional)
+const ASKABLE_FIELDS = [...REQUIRED_FIELDS, ...REPORTER_IDENTITY_FIELDS];
+// All non-optional fields (used for counting filled fields)
+const NON_OPTIONAL_FIELDS = [...REQUIRED_FIELDS, ...REPORTER_IDENTITY_FIELDS, ...CONTEXTUAL_FIELDS];
 
 /**
  * Returns true if any message text contains at least one fraud keyword.
@@ -61,8 +66,11 @@ const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !=
 
 /**
  * Server-side deterministic check: is enough data collected to generate the document?
- * Returns true when ALL required fields are filled AND total filled fields ≥ 5.
+ * Returns true when ALL required fields are filled AND total filled fields ≥ 4.
  * This OVERRIDES the AI's documentReady flag to prevent infinite "ask more" loops.
+ *
+ * Threshold lowered from 5→4 because suspect fields are contextual — many legitimate
+ * reports (e.g. reporting a gambling website) have no suspect identity info.
  */
 const isDocumentReady = (extractedData) => {
   if (!extractedData || typeof extractedData !== 'object') return false;
@@ -70,10 +78,11 @@ const isDocumentReady = (extractedData) => {
     (f) => isNonEmptyString(String(extractedData[f] ?? ''))
   );
   if (!allRequiredFilled) return false;
+  // Count ALL non-optional fields (including contextual if user provided them)
   const totalFilled = NON_OPTIONAL_FIELDS.filter(
     (f) => isNonEmptyString(String(extractedData[f] ?? ''))
   ).length;
-  return totalFilled >= 5;
+  return totalFilled >= 4;
 };
 
 const normalizeString = (value) => (isNonEmptyString(value) ? value.trim() : undefined);
@@ -158,20 +167,21 @@ const buildConfirmationMessage = (extractedData) => {
 
 /**
  * Build a Vietnamese bullet-list of MISSING fields from extractedData.
- * Only checks NON-optional fields (excludes evidence, recipientAuthority).
+ * Only checks ASKABLE fields (reporter identity + required) — excludes contextual
+ * (suspect) and optional (evidence, recipientAuthority) fields.
  * Returns null when:
  *  – extractedData is falsy (AI hasn't returned structured data yet)
- *  – ALL non-optional fields are empty (AI hasn't started — use AI followup)
- *  – ZERO non-optional fields are empty (all required data collected)
+ *  – ALL askable fields are empty (AI hasn't started — use AI followup)
+ *  – ZERO askable fields are empty (all reporter data collected)
  */
-const NON_OPTIONAL_LABELS = Object.fromEntries(
-  Object.entries(EXTRACTED_DATA_LABELS).filter(([key]) => NON_OPTIONAL_FIELDS.includes(key))
+const ASKABLE_LABELS = Object.fromEntries(
+  Object.entries(EXTRACTED_DATA_LABELS).filter(([key]) => ASKABLE_FIELDS.includes(key))
 );
 
 const buildMissingFieldsMessage = (extractedData) => {
   if (!extractedData) return null;
-  const allKeys = Object.keys(NON_OPTIONAL_LABELS);
-  const missing = Object.entries(NON_OPTIONAL_LABELS)
+  const allKeys = Object.keys(ASKABLE_LABELS);
+  const missing = Object.entries(ASKABLE_LABELS)
     .filter(([key]) => !isNonEmptyString(String(extractedData[key] ?? '')))
     .map(([, label]) => `- ${label}`);
   // ALL empty → AI hasn't started extracting; NONE empty → all collected
@@ -598,7 +608,8 @@ const buildPrompt = ({ senderId, messages, history, openReport, accumulatedData 
   const accData = accumulatedData?.extractedData || {};
   const filledFields = Object.entries(accData)
     .filter(([, v]) => isNonEmptyString(String(v ?? '')));
-  const missingFieldNames = NON_OPTIONAL_FIELDS
+  // Only list ASKABLE fields as missing (excludes suspect/optional fields)
+  const missingFieldNames = ASKABLE_FIELDS
     .filter((f) => !isNonEmptyString(String(accData[f] ?? '')));
 
   const accumulatedLines = filledFields.length > 0
