@@ -23,15 +23,26 @@ const parseJsonFromModelText = (text) => {
   }
 };
 
-const getModelClient = () => {
+const getModelClient = (systemInstruction) => {
   if (!env.geminiApiKey) {
     return null;
   }
   const client = new GoogleGenerativeAI(env.geminiApiKey);
-  return client.getGenerativeModel({ model: env.geminiModel });
+  const config = { model: env.geminiModel };
+  if (systemInstruction) {
+    config.systemInstruction = systemInstruction;
+  }
+  return client.getGenerativeModel(config);
 };
 
-export const analyzeWithGemini = async (promptText) => {
+/**
+ * Analyze a prompt with Gemini.
+ *
+ * Supports two calling conventions:
+ *   1. analyzeWithGemini(promptText)              — legacy single-string (backward compatible)
+ *   2. analyzeWithGemini(systemPrompt, userPrompt) — new: uses systemInstruction
+ */
+export const analyzeWithGemini = async (systemPromptOrText, userPrompt) => {
   if (process.env.E2E_MOCK === 'true') {
     return {
       intent: 'report_crime',
@@ -63,7 +74,12 @@ export const analyzeWithGemini = async (promptText) => {
     };
   }
 
-  const model = getModelClient();
+  // Determine calling convention
+  const isNewSignature = userPrompt !== undefined;
+  const systemInstruction = isNewSignature ? systemPromptOrText : undefined;
+  const promptText = isNewSignature ? userPrompt : systemPromptOrText;
+
+  const model = getModelClient(systemInstruction);
   if (!model) {
     console.warn('[gemini.service] Missing GEMINI_API_KEY, returning safe fallback');
     return createSafeAiFallback();

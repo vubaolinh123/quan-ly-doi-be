@@ -1,12 +1,12 @@
 import Report from '../models/Report.js';
 import ConversationMessage from '../models/ConversationMessage.js';
 import PendingConfirmation from '../models/PendingConfirmation.js';
+import SenderState from '../models/SenderState.js';
 import { messageBatchService } from './message-batch.service.js';
 import { analyzeWithGemini } from './gemini.service.js';
 import { sendFacebookFileMessage, sendFacebookTextMessage } from './facebook.service.js';
 import { sendApprovalMessage, sendNoteUpdateMessage } from './telegram.service.js';
-import { BASE_SYSTEM_PROMPT } from '../prompts/system/base-system.prompt.js';
-import { buildCategoryClassifierPrompt } from '../prompts/classification/category-classifier.prompt.js';
+import { SYSTEM_INSTRUCTION } from '../prompts/system/base-system.prompt.js';
 import { INTAKE_FOLLOWUP_PROMPT } from '../prompts/conversation/intake-followup.prompt.js';
 import { ADMIN_SUMMARY_PROMPT } from '../prompts/summary/admin-summary.prompt.js';
 import SystemConfig from '../models/SystemConfig.js';
@@ -21,10 +21,10 @@ const CONFIDENCE_THRESHOLD = 0.5;   // minimum AI confidence to persist a Report
 /**
  * How many recent conversation messages to fetch per sender.
  * Fetching more gives the AI better context but increases prompt size.
- *   - 15 covers roughly 3-5 batch windows of back-and-forth, which is enough
- *     for most conversations without blowing the context window.
+ *   - 30 covers roughly 7-15 batch windows of back-and-forth, enough for
+ *     the full 7-step data collection flow without clipping early steps.
  */
-const HISTORY_LIMIT = 15;
+const HISTORY_LIMIT = 30;
 
 // ── Fast-path (filter OFF) ────────────────────────────────────────────────────
 /**
@@ -37,6 +37,16 @@ const FRAUD_KEYWORDS = [
   'lừa tiền', 'chiếm đoạt', 'lừa', 'scam'
 ];
 
+// ── Field classification for server-side documentReady ────────────────────
+const REQUIRED_FIELDS = ['reporterName', 'crimeType', 'crimeDescription'];
+const NICE_TO_HAVE_FIELDS = [
+  'reporterBirthYear', 'reporterIdNumber', 'reporterIdIssuedBy',
+  'reporterIdIssuedDate', 'reporterPermanentAddress', 'reporterCurrentAddress',
+  'suspectName', 'suspectCurrentAddress'
+];
+const OPTIONAL_FIELDS = ['evidence', 'recipientAuthority'];
+const NON_OPTIONAL_FIELDS = [...REQUIRED_FIELDS, ...NICE_TO_HAVE_FIELDS];
+
 /**
  * Returns true if any message text contains at least one fraud keyword.
  * Matching is case-insensitive (toLowerCase) — no diacritic normalisation needed
@@ -48,6 +58,23 @@ const hasFraudKeyword = (messages) => {
 };
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
+
+/**
+ * Server-side deterministic check: is enough data collected to generate the document?
+ * Returns true when ALL required fields are filled AND total filled fields ≥ 5.
+ * This OVERRIDES the AI's documentReady flag to prevent infinite "ask more" loops.
+ */
+const isDocumentReady = (extractedData) => {
+  if (!extractedData || typeof extractedData !== 'object') return false;
+  const allRequiredFilled = REQUIRED_FIELDS.every(
+    (f) => isNonEmptyString(String(extractedData[f] ?? ''))
+  );
+  if (!allRequiredFilled) return false;
+  const totalFilled = NON_OPTIONAL_FIELDS.filter(
+    (f) => isNonEmptyString(String(extractedData[f] ?? ''))
+  ).length;
+  return totalFilled >= 5;
+};
 
 const normalizeString = (value) => (isNonEmptyString(value) ? value.trim() : undefined);
 
@@ -131,15 +158,20 @@ const buildConfirmationMessage = (extractedData) => {
 
 /**
  * Build a Vietnamese bullet-list of MISSING fields from extractedData.
+ * Only checks NON-optional fields (excludes evidence, recipientAuthority).
  * Returns null when:
  *  – extractedData is falsy (AI hasn't returned structured data yet)
- *  – ALL fields are empty  (AI hasn't started extracting — use AI followup)
- *  – ZERO fields are empty (all data collected — documentReady flow handles this)
+ *  – ALL non-optional fields are empty (AI hasn't started — use AI followup)
+ *  – ZERO non-optional fields are empty (all required data collected)
  */
+const NON_OPTIONAL_LABELS = Object.fromEntries(
+  Object.entries(EXTRACTED_DATA_LABELS).filter(([key]) => NON_OPTIONAL_FIELDS.includes(key))
+);
+
 const buildMissingFieldsMessage = (extractedData) => {
   if (!extractedData) return null;
-  const allKeys = Object.keys(EXTRACTED_DATA_LABELS);
-  const missing = Object.entries(EXTRACTED_DATA_LABELS)
+  const allKeys = Object.keys(NON_OPTIONAL_LABELS);
+  const missing = Object.entries(NON_OPTIONAL_LABELS)
     .filter(([key]) => !isNonEmptyString(String(extractedData[key] ?? '')))
     .map(([, label]) => `- ${label}`);
   // ALL empty → AI hasn't started extracting; NONE empty → all collected
@@ -288,6 +320,7 @@ const finalizePendingConfirmation = async ({ senderId, pending }) => {
     console.info('[ai-orchestrator] Finalize: generating document for report %s (documentReady=%s, documentGenerated=%s)', updatedReport?._id, analysis.documentReady, updatedReport?.documentGenerated);
     updatedReport = await maybeGenerateAndSendDocument({ report: updatedReport, analysis, senderId });
 
+    await clearSenderState(senderId);
     await PendingConfirmation.deleteOne({ _id: pending._id });
     return updatedReport;
   }
@@ -325,6 +358,7 @@ const finalizePendingConfirmation = async ({ senderId, pending }) => {
   console.info('[ai-orchestrator] Finalize: generating document for report %s (documentReady=%s, documentGenerated=%s)', report._id, analysis.documentReady, report.documentGenerated);
   report = await maybeGenerateAndSendDocument({ report, analysis, senderId });
 
+  await clearSenderState(senderId);
   await PendingConfirmation.deleteOne({ _id: pending._id });
   return report;
 };
@@ -354,8 +388,9 @@ const handlePendingConfirmation = async ({ senderId, messages, pending }) => {
   try {
     const history = await getConversationHistory(senderId);
     const openReport = pending.openReportId ? await Report.findById(pending.openReportId).lean() : null;
-    const aiPrompt = buildPrompt({ senderId, messages, history, openReport });
-    const analysis = await analyzeWithGemini(aiPrompt);
+    const accumulatedData = await loadSenderState(senderId);
+    const { systemPrompt: corrSystemPrompt, userPrompt: corrUserPrompt } = buildPrompt({ senderId, messages, history, openReport, accumulatedData });
+    const analysis = await analyzeWithGemini(corrSystemPrompt, corrUserPrompt);
 
     // Save inbound only after AI prompt is built, avoiding duplicate context
     await saveToHistory(senderId, messages, null);
@@ -368,6 +403,9 @@ const handlePendingConfirmation = async ({ senderId, messages, pending }) => {
         merged[key] = value;
       }
     }
+
+    // Persist merged state for future prompts
+    await updateSenderState(senderId, merged, analysis.currentStep);
 
     // Update snapshot fields that may have changed
     const updatedSnapshot = { ...pending.analysisSnapshot };
@@ -467,23 +505,62 @@ const saveToHistory = async (senderId, messages, outboundText) => {
   }
 };
 
+// ── SenderState helpers ──────────────────────────────────────────────────────
+
 /**
- * Build the full AI prompt.
- *
- * Structure:
- *   1. System-level instructions (persona, task, category codes, …)
- *   2. ── LỊCH SỬ HỘI THOẠI ── (if any prior messages exist for this sender)
- *      Each line: [ISO timestamp] USER|AI: <text>
- *   3. ── BÁO CÁO ĐANG CHỜ DUYỆT ── (if sender already has a pending report)
- *      Informs AI about the open report so it can decide: supplement vs new incident
- *   4. ── TIN NHẮN MỚI CẦN PHÂN TÍCH ──
- *      Numbered list of messages in the current batch
- *   5. JSON output format spec
- *
- * Including history prevents the AI from repeating follow-up questions that
- * were already asked in an earlier batch window.
+ * Load accumulated extracted data for a sender from SenderState.
+ * Falls back to empty object if no state exists.
  */
-const buildPrompt = ({ senderId, messages, history, openReport }) => {
+const loadSenderState = async (senderId) => {
+  const state = await SenderState.findOne({ senderId }).lean();
+  return state || { extractedData: {}, currentStep: 'step_1' };
+};
+
+/**
+ * Merge new AI-extracted data into SenderState.
+ * New non-null values override existing ones; null/empty values are ignored.
+ * Returns the merged extractedData object.
+ */
+const updateSenderState = async (senderId, newExtractedData, currentStep) => {
+  const existing = await SenderState.findOne({ senderId });
+  const merged = { ...(existing?.extractedData || {}) };
+
+  for (const [key, value] of Object.entries(newExtractedData || {})) {
+    if (value !== null && value !== undefined && value !== '') {
+      merged[key] = value;
+    }
+  }
+
+  await SenderState.findOneAndUpdate(
+    { senderId },
+    {
+      $set: {
+        extractedData: merged,
+        currentStep: currentStep || 'step_1',
+        createdAt: new Date()
+      }
+    },
+    { upsert: true, new: true }
+  );
+
+  return merged;
+};
+
+/**
+ * Clear SenderState when starting a brand-new report (different incident)
+ * or after finalizing a pending confirmation.
+ */
+const clearSenderState = async (senderId) => {
+  await SenderState.deleteOne({ senderId });
+};
+
+/**
+ * Build the AI prompt pair: systemPrompt (static) + userPrompt (dynamic).
+ *
+ * systemPrompt → Gemini systemInstruction (role, rules, output format)
+ * userPrompt   → contents[0] (accumulated data, history, new messages, task)
+ */
+const buildPrompt = ({ senderId, messages, history, openReport, accumulatedData }) => {
   // ── Current batch transcript ──────────────────────────────────────────────
   const transcript = messages
     .map((m, idx) =>
@@ -505,6 +582,33 @@ const buildPrompt = ({ senderId, messages, history, openReport }) => {
     : [
         '',
         '(Không có lịch sử hội thoại — đây là tin nhắn đầu tiên từ người dùng này.)',
+      ];
+
+  // ── Accumulated extracted data section ──────────────────────────────────
+  const accData = accumulatedData?.extractedData || {};
+  const filledFields = Object.entries(accData)
+    .filter(([, v]) => isNonEmptyString(String(v ?? '')));
+  const missingFieldNames = NON_OPTIONAL_FIELDS
+    .filter((f) => !isNonEmptyString(String(accData[f] ?? '')));
+
+  const accumulatedLines = filledFields.length > 0
+    ? [
+        '',
+        '=== DỮ LIỆU ĐÃ THU THẬP (từ các lượt trước) ===',
+        '{',
+        ...filledFields.map(([k, v], i) =>
+          `  "${k}": "${v}"${i < filledFields.length - 1 ? ',' : ''}`
+        ),
+        '}',
+        missingFieldNames.length > 0
+          ? `CÒN THIẾU: ${missingFieldNames.join(', ')}`
+          : 'ĐÃ ĐỦ DỮ LIỆU BẮT BUỘC — hãy set documentReady=true',
+        '⚠️ GIỮ NGUYÊN các giá trị đã có. Chỉ cập nhật từ tin nhắn mới. Chỉ ghi đè nếu user sửa rõ ràng.',
+        '=== HẾT DỮ LIỆU ĐÃ THU THẬP ===',
+      ]
+    : [
+        '',
+        '(Chưa có dữ liệu thu thập từ các lượt trước — đây có thể là lượt đầu tiên.)',
       ];
 
   // ── Existing pending report section (if any) ─────────────────────────────
@@ -532,16 +636,14 @@ const buildPrompt = ({ senderId, messages, history, openReport }) => {
         '(Người gửi này chưa có báo cáo nào đang chờ duyệt. reportAction = "new_report".)',
       ];
 
-  // ── JSON format spec ──────────────────────────────────────────────────────
-  const reportActionNote = openReport
-    ? '"reportAction":"new_report|supplement_existing_report",'
-    : '';
+  // ── Build system prompt (static instructions) ─────────────────────────────
+  const systemPrompt = SYSTEM_INSTRUCTION;
 
-  return [
-    BASE_SYSTEM_PROMPT,
-    buildCategoryClassifierPrompt(),
+  // ── Build user prompt (dynamic per-request content) ───────────────────────
+  const userPrompt = [
     INTAKE_FOLLOWUP_PROMPT,
     ADMIN_SUMMARY_PROMPT,
+    ...accumulatedLines,
     ...historyLines,
     ...openReportLines,
     '',
@@ -549,19 +651,11 @@ const buildPrompt = ({ senderId, messages, history, openReport }) => {
     'Tin nhắn mới cần phân tích:',
     transcript,
     '',
-    'Lưu ý: Nếu lịch sử hội thoại cho thấy bạn đã hỏi thông tin này rồi, ' +
-    'ĐỪNG hỏi lại — hãy chuyển sang bước tiếp theo hoặc xác nhận đã tiếp nhận.',
-    '',
-    'JSON output format:',
-    `{"intent":"report_crime|ask_info|complaint|other","suggestedCategoryCode":"<CATEGORY_CODE>",` +
-    `"confidence":0.0,"missingFields":["field1"],"followupMessage":"...","adminSummary":"...",` +
-    `"noteSummary":"...","reportTitle":"...",${reportActionNote}` +
-    `"extractedData":{"reporterName":null,"reporterBirthYear":null,"reporterIdNumber":null,` +
-    `"reporterIdIssuedBy":null,"reporterIdIssuedDate":null,"reporterPermanentAddress":null,` +
-    `"reporterCurrentAddress":null,"suspectName":null,"suspectCurrentAddress":null,` +
-    `"crimeType":null,"crimeDescription":null,"evidence":null,"recipientAuthority":null},` +
-    `"documentReady":false,"currentStep":"step_1"}`
+    'Lưu ý: Nếu "DỮ LIỆU ĐÃ THU THẬP" có giá trị cho 1 trường, ' +
+    'ĐỪNG hỏi lại — giữ nguyên giá trị đó trong extractedData.',
   ].join('\n');
+
+  return { systemPrompt, userPrompt };
 };
 
 // ── Main orchestrator ─────────────────────────────────────────────────────────
@@ -681,9 +775,37 @@ export const processBatch = async ({ senderId, messages }) => {
     senderId, messages.length, history.length, openReport?._id ?? 'none'
   );
 
+  // ── Step 1.7: Load accumulated sender state ─────────────────────────────
+  const accumulatedData = await loadSenderState(senderId);
+
   // ── Step 2: Call Gemini with history-enriched prompt ─────────────────────
-  const aiPrompt = buildPrompt({ senderId, messages, history, openReport });
-  const analysis = await analyzeWithGemini(aiPrompt);
+  const { systemPrompt: aiSystemPrompt, userPrompt: aiUserPrompt } = buildPrompt({ senderId, messages, history, openReport, accumulatedData });
+  const analysis = await analyzeWithGemini(aiSystemPrompt, aiUserPrompt);
+
+  // ── Step 2.5: Update sender state with merged extracted data ─────────────
+  const newExtracted = getExtractedData(analysis);
+  const mergedData = await updateSenderState(senderId, newExtracted, analysis.currentStep);
+
+  // ── Step 2.6: Server-side documentReady override ─────────────────────────
+  // Check both AI's current extraction AND merged accumulated data
+  const serverDocReady = isDocumentReady(mergedData);
+  if (serverDocReady && !analysis.documentReady) {
+    console.info('[ai-orchestrator] Server-side override: documentReady forced to true (AI said false)');
+    analysis.documentReady = true;
+    // Use merged data so confirmation message includes all accumulated fields
+    analysis.extractedData = mergedData;
+  }
+
+  const filledCount = NON_OPTIONAL_FIELDS.filter(
+    (f) => isNonEmptyString(String(mergedData[f] ?? ''))
+  ).length;
+  const requiredCount = REQUIRED_FIELDS.filter(
+    (f) => isNonEmptyString(String(mergedData[f] ?? ''))
+  ).length;
+  console.info(
+    '[ai-orchestrator] Turn stats: filled=%d/%d, required=%d/%d, documentReady=%s',
+    filledCount, NON_OPTIONAL_FIELDS.length, requiredCount, REQUIRED_FIELDS.length, analysis.documentReady
+  );
 
   // ── Step 3: Persist conversation (inbound batch + outbound AI reply) ──────
   // Done immediately after AI responds, BEFORE the classification gate, so even
@@ -814,6 +936,7 @@ export const processBatch = async ({ senderId, messages }) => {
       '[ai-orchestrator] reportAction=new_report — creating new report despite open report %s for sender %s',
       openReport._id, senderId
     );
+    await clearSenderState(senderId);
   }
 
   // If AI says the information is sufficient, do NOT create Report yet.

@@ -91,29 +91,50 @@ const getFacebookConversationUrl = (facebookId) => {
 
 const buildApprovalMessage = (report) => {
   const reporter  = report.reporterInfo || {};
+  const suspect   = report.suspectInfo || {};
   const catCode   = report.finalCategoryCode || report.categoryCode || 'KHXM';
   const catName   = CATEGORY_CODES[catCode] || catCode;
   const channel   = CHANNEL_LABEL[report.channel] || report.channel || '—';
 
   // Truncate raw content so the message stays within Telegram's 4 096-char limit
   const rawContent = String(report.content || '');
-  const content    = rawContent.length > 350
-    ? rawContent.slice(0, 350) + '…'
+  const content    = rawContent.length > 300
+    ? rawContent.slice(0, 300) + '…'
     : rawContent;
 
   // ── Reporter block ────────────────────────────────────────────────────────
   const reporterLines = [];
-  if (reporter.fullName)     reporterLines.push(`  • Họ tên  : ${reporter.fullName}`);
-  if (reporter.phone)        reporterLines.push(`  • SĐT    : ${reporter.phone}`);
-  if (reporter.age)          reporterLines.push(`  • Tuổi   : ${reporter.age}`);
+  if (reporter.fullName)          reporterLines.push(`  • Họ tên    : ${reporter.fullName}`);
+  if (reporter.phone)             reporterLines.push(`  • SĐT      : ${reporter.phone}`);
+  if (reporter.age)               reporterLines.push(`  • Tuổi     : ${reporter.age}`);
+  if (reporter.identityNumber)    reporterLines.push(`  • CCCD     : ${reporter.identityNumber}`);
+  if (reporter.birthYear)         reporterLines.push(`  • Năm sinh : ${reporter.birthYear}`);
+  if (reporter.permanentAddress)  reporterLines.push(`  • ĐKTT     : ${reporter.permanentAddress}`);
+  if (reporter.currentAddress)    reporterLines.push(`  • Nơi ở    : ${reporter.currentAddress}`);
   if (reporter.facebookId) {
     const fbUrl = getFacebookConversationUrl(reporter.facebookId);
-    reporterLines.push(`  • Facebook: ${fbUrl || reporter.facebookId}`);
+    reporterLines.push(`  • Facebook : ${fbUrl || reporter.facebookId}`);
   }
   if (!reporterLines.length) reporterLines.push('  • Ẩn danh / chưa xác định');
 
+  // ── Suspect block ─────────────────────────────────────────────────────────
+  const suspectLines = [];
+  if (suspect.name)           suspectLines.push(`  • Họ tên : ${suspect.name}`);
+  if (suspect.currentAddress) suspectLines.push(`  • Địa chỉ: ${suspect.currentAddress}`);
+
+  // ── Crime details block ───────────────────────────────────────────────────
+  const crimeLines = [];
+  if (report.crimeType)        crimeLines.push(`  • Loại    : ${report.crimeType}`);
+  if (report.crimeDescription) {
+    const desc = String(report.crimeDescription);
+    crimeLines.push(`  • Mô tả   : ${desc.length > 200 ? desc.slice(0, 200) + '…' : desc}`);
+  }
+
   // ── AI summary block ──────────────────────────────────────────────────────
   const aiSummary = String(report.aiAnalysis?.summary || '').trim();
+
+  // ── Document status ───────────────────────────────────────────────────────
+  const docStatus = report.documentGenerated ? '✅ Đã tạo đơn tố giác' : '⏳ Chưa tạo đơn';
 
   const parts = [
     '🔔 BÁO CÁO MỚI — CHỜ DUYỆT',
@@ -122,14 +143,28 @@ const buildApprovalMessage = (report) => {
     '📋 THÔNG TIN CHUNG',
     `  • Mã BC  : ${report.reportCode}`,
     `  • Kênh   : ${channel}`,
+    `  • Đơn    : ${docStatus}`,
     '',
     '👤 NGƯỜI TỐ GIÁC',
     ...reporterLines,
     '',
-    '📝 NỘI DUNG TỐ GIÁC',
-    content,
-    '',
   ];
+
+  if (suspectLines.length > 0) {
+    parts.push('🔍 ĐỐI TƯỢNG BỊ TỐ GIÁC');
+    parts.push(...suspectLines);
+    parts.push('');
+  }
+
+  if (crimeLines.length > 0) {
+    parts.push('⚖️ HÀNH VI VI PHẠM');
+    parts.push(...crimeLines);
+    parts.push('');
+  }
+
+  parts.push('📝 NỘI DUNG TỐ GIÁC');
+  parts.push(content);
+  parts.push('');
 
   if (aiSummary) {
     parts.push('🤖 PHÂN TÍCH AI');
